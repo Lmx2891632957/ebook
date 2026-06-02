@@ -18,6 +18,9 @@
 #define EBOOK_PREV_MAX      40      /* max previous page offsets stored */
 #define EBOOK_PAGE_BUF_SIZE 4096    /* page render buffer size */
 #define EBOOK_SWIPE_THRESH  50      /* swipe threshold in pixels */
+#define FONT_SEL_BTN_W      60      /* font selection button width */
+#define FONT_SEL_BTN_H      40      /* font selection button height */
+#define FONT_SEL_PAD         8      /* font selection panel padding */
 
 /* ebook reader context */
 typedef struct {

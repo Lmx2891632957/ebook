@@ -3,7 +3,7 @@
 <title>Static Call Graph - [..\..\Output\atk_f103.axf]</title></head>
 <body><HR>
 <H1>Static Call Graph for image ..\..\Output\atk_f103.axf</H1><HR>
-<BR><P>#&#060CALLGRAPH&#062# ARM Linker, 5060960: Last Updated: Tue Jun 02 11:46:26 2026
+<BR><P>#&#060CALLGRAPH&#062# ARM Linker, 5060960: Last Updated: Tue Jun 02 21:32:01 2026
 <BR><P>
 <H3>Maximum Stack Usage =       1260 bytes + Unknown(Functions without stacksize, Cycles, Untraceable Function Pointers)</H3><H3>
 Call chain for Maximum Stack Depth:</H3>
@@ -2462,7 +2462,7 @@ Global Symbols
 <LI><a href="#[166]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;create_partition
 </UL>
 
-<P><STRONG><a name="[19b]"></a>ebook_play</STRONG> (Thumb, 1052 bytes, Stack size 384 bytes, ebook.o(i.ebook_play))
+<P><STRONG><a name="[19b]"></a>ebook_play</STRONG> (Thumb, 1746 bytes, Stack size 384 bytes, ebook.o(i.ebook_play))
 <BR><BR>[Stack]<UL><LI>Max Depth = 1260 + Unknown Stack Size
 <LI>Call Chain = ebook_play &rArr; window_msg_box &rArr; window_draw &rArr; btn_draw &rArr; btn_draw_picbtn &rArr; minibmp_decode &rArr; f_open &rArr; dir_register &rArr; dir_find &rArr; dir_read &rArr; load_xdir &rArr; dir_next &rArr; create_chain &rArr; fill_last_frag &rArr; put_fat &rArr; move_window &rArr; sync_window &rArr; disk_write &rArr; sd_init &rArr; sd_spi_init &rArr; spi1_init &rArr; sys_gpio_set
 </UL>
@@ -2482,6 +2482,7 @@ Global Symbols
 <LI><a href="#[127]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;app_gui_tcbar
 <LI><a href="#[126]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;app_filebrower
 <LI><a href="#[19f]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;key_scan
+<LI><a href="#[129]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;gui_fill_rectangle
 <LI><a href="#[13e]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;delay_ms
 <LI><a href="#[1ad]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;window_msg_box
 <LI><a href="#[19a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;gui_show_string
@@ -3520,6 +3521,7 @@ Global Symbols
 <BR>[Called By]<UL><LI><a href="#[197]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ebook_draw_page
 <LI><a href="#[296]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;window_draw
 <LI><a href="#[127]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;app_gui_tcbar
+<LI><a href="#[19b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ebook_play
 <LI><a href="#[26b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;system_font_update_confirm
 <LI><a href="#[26a]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;system_files_erase
 <LI><a href="#[19e]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;filelistbox_draw_listbox
@@ -5591,7 +5593,7 @@ Local Symbols
 <BR>[Called By]<UL><LI><a href="#[19b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ebook_play
 </UL>
 
-<P><STRONG><a name="[195]"></a>ebook_ctx_init</STRONG> (Thumb, 126 bytes, Stack size 24 bytes, ebook.o(i.ebook_ctx_init))
+<P><STRONG><a name="[195]"></a>ebook_ctx_init</STRONG> (Thumb, 132 bytes, Stack size 24 bytes, ebook.o(i.ebook_ctx_init))
 <BR><BR>[Stack]<UL><LI>Max Depth = 56<LI>Call Chain = ebook_ctx_init &rArr; gui_memin_malloc &rArr; mymalloc &rArr; my_mem_malloc
 </UL>
 <BR>[Calls]<UL><LI><a href="#[121]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;gui_memin_malloc
@@ -5600,7 +5602,7 @@ Local Symbols
 <BR>[Called By]<UL><LI><a href="#[19b]">&gt;&gt;</a>&nbsp;&nbsp;&nbsp;ebook_play
 </UL>
 
-<P><STRONG><a name="[197]"></a>ebook_draw_page</STRONG> (Thumb, 98 bytes, Stack size 32 bytes, ebook.o(i.ebook_draw_page))
+<P><STRONG><a name="[197]"></a>ebook_draw_page</STRONG> (Thumb, 118 bytes, Stack size 32 bytes, ebook.o(i.ebook_draw_page))
 <BR><BR>[Stack]<UL><LI>Max Depth = 348 + Unknown Stack Size
 <LI>Call Chain = ebook_draw_page &rArr; f_lseek &rArr; create_chain &rArr; fill_last_frag &rArr; put_fat &rArr; move_window &rArr; sync_window &rArr; disk_write &rArr; sd_init &rArr; sd_spi_init &rArr; spi1_init &rArr; sys_gpio_set
 </UL>

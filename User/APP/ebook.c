@@ -57,8 +57,9 @@ static uint8_t ebook_ctx_init(ebook_ctx_t *ctx, FIL *f_txt, uint8_t *pname, uint
     ctx->text_x      = 2;
     ctx->text_y      = gui_phy.tbheight + 2;
     ctx->text_width  = lcddev.width - 4;
-    ctx->text_height = lcddev.height - gui_phy.tbheight * 2 - 8;
     ctx->font_size   = gui_phy.tbfsize;
+    ctx->text_height = ((lcddev.height - gui_phy.tbheight * 2 - 8)
+                        / ctx->font_size) * ctx->font_size;
 
     ctx->prev_count = 0;
 
@@ -175,7 +176,7 @@ static void ebook_scan_page_forward(ebook_ctx_t *ctx)
                 }
                 if (y > max_y)
                 {
-                    /* Page full ï¿??? start next page from the pending GBK lead byte */
+                    /* Page full ï¿½??? start next page from the pending GBK lead byte */
                     ctx->page_end = file_pos - 1;
                     return;
                 }
@@ -245,7 +246,7 @@ static void ebook_scan_page_forward(ebook_ctx_t *ctx)
                         }
                         if (y > max_y)
                         {
-                            /* This char would overflow ï¿??? start next page here */
+                            /* This char would overflow ï¿½??? start next page here */
                             ctx->page_end = abs_pos;
                             return;
                         }
@@ -288,7 +289,7 @@ static void ebook_scan_page_forward(ebook_ctx_t *ctx)
             }
             if (y > max_y)
             {
-                /* This ASCII char would overflow ï¿??? start next page here */
+                /* This ASCII char would overflow ï¿½??? start next page here */
                 ctx->page_end = abs_pos;
                 return;
             }
@@ -299,7 +300,7 @@ static void ebook_scan_page_forward(ebook_ctx_t *ctx)
         file_pos += bread;
     }
 
-    /* EOF reached ï¿??? page ends at file end */
+    /* EOF reached ï¿½??? page ends at file end */
     ctx->page_end = ctx->file_size;
 }
 
@@ -313,9 +314,13 @@ static void ebook_draw_page(ebook_ctx_t *ctx)
     UINT     bread;
     uint32_t page_size = ctx->page_end - ctx->page_start;
 
-    /* Clear text area to white background */
+    /* Clear text area to white background (full physical height,
+     * not the font-aligned ctx->text_height, to avoid residue when
+     * font size changes and the aligned height shrinks) */
     gui_fill_rectangle(ctx->text_x, ctx->text_y,
-                       ctx->text_width, ctx->text_height, WHITE);
+                       ctx->text_width,
+                       lcddev.height - gui_phy.tbheight * 2 - 8,
+                       WHITE);
 
     if (page_size > 0 && page_size < EBOOK_PAGE_BUF_SIZE)
     {
@@ -410,6 +415,7 @@ uint8_t ebook_play(void)
     uint8_t *buf;
 
     _btn_obj *rbtn;
+    _btn_obj *fbtn;
     _filelistbox_obj *flistbox;
     _filelistbox_list *filelistx;
 
@@ -452,6 +458,21 @@ uint8_t ebook_play(void)
         rbtn->bcfdcolor = WHITE;
         rbtn->bcfucolor = WHITE;
         btn_draw(rbtn);
+    }
+
+    /* Font button - positioned to the left of return button */
+    fbtn = btn_creat(lcddev.width - 4 * gui_phy.tbfsize - 21,
+                     lcddev.height - gui_phy.tbheight,
+                     2 * gui_phy.tbfsize + 8, gui_phy.tbheight - 1,
+                     0, 0x03);
+
+    if (fbtn)
+    {
+        fbtn->caption   = (uint8_t *)"\xD7\xD6\xCC\xE5";   /* "å­—ä½“" in GBK */
+        fbtn->font      = gui_phy.tbfsize;
+        fbtn->bcfdcolor = WHITE;
+        fbtn->bcfucolor = WHITE;
+        btn_draw(fbtn);
     }
 
     buf = gui_memin_malloc(1024);
@@ -522,7 +543,7 @@ uint8_t ebook_play(void)
                 }
             }
 
-            /* Double-click on a file ï¿??? enter reading state */
+            /* Double-click on a file to enter reading state */
             if (flistbox->dbclick == 0X81)
             {
                 rval = f_opendir(&ebookdir, (const TCHAR *)flistbox->path);
@@ -559,7 +580,7 @@ uint8_t ebook_play(void)
                     break;
                 }
 
-                /* f_txt is now owned by ctx->file ï¿?? do NOT free it here */
+                /* f_txt is now owned by ctx->file ï¿½?? do NOT free it here */
 
                 /* Load and display first page */
                 ctx->page_num = 1;
@@ -570,6 +591,7 @@ uint8_t ebook_play(void)
                 system_task_return = 0;
                 flistbox->dbclick = 0;
                 ebooksta = 1;
+                btn_draw(fbtn);   /* ensure font button is visible */
             }
         }
 
@@ -578,6 +600,139 @@ uint8_t ebook_play(void)
          * ================================================================ */
         if (ebooksta == 1)
         {
+            /* ---- Check font button ---- */
+            if (fbtn)
+            {
+                res = btn_check(fbtn, &in_obj);
+
+                if (res && ((fbtn->sta & 0X80) == 0))
+                {
+                uint16_t panel_x;
+                uint16_t panel_y;
+                uint16_t font_sel;
+                _btn_obj *btn12, *btn16, *btn24, *btn_cancel;
+
+                panel_x  = (lcddev.width
+                            - (3 * FONT_SEL_BTN_W + 4 * FONT_SEL_PAD)) / 2;
+                panel_y  = lcddev.height / 3;
+                font_sel = 0;
+
+                /* Draw panel background over current page */
+                gui_fill_rectangle(panel_x, panel_y,
+                                   3 * FONT_SEL_BTN_W + 4 * FONT_SEL_PAD,
+                                   FONT_SEL_BTN_H + 36 + 3 * FONT_SEL_PAD,
+                                   0xC618);
+
+                /* Create font size buttons (12 / 16 / 24) */
+                btn12 = btn_creat(panel_x + FONT_SEL_PAD,
+                                  panel_y + FONT_SEL_PAD,
+                                  FONT_SEL_BTN_W, FONT_SEL_BTN_H,
+                                  0, BTN_TYPE_ANG);
+                btn16 = btn_creat(panel_x + FONT_SEL_PAD * 2 + FONT_SEL_BTN_W,
+                                  panel_y + FONT_SEL_PAD,
+                                  FONT_SEL_BTN_W, FONT_SEL_BTN_H,
+                                  0, BTN_TYPE_ANG);
+                btn24 = btn_creat(panel_x + FONT_SEL_PAD * 3 + FONT_SEL_BTN_W * 2,
+                                  panel_y + FONT_SEL_PAD,
+                                  FONT_SEL_BTN_W, FONT_SEL_BTN_H,
+                                  0, BTN_TYPE_ANG);
+                btn_cancel = btn_creat(panel_x + FONT_SEL_PAD,
+                                       panel_y + FONT_SEL_PAD * 2 + FONT_SEL_BTN_H,
+                                       3 * FONT_SEL_BTN_W + 2 * FONT_SEL_PAD,
+                                       36, 0, BTN_TYPE_ANG);
+
+                /* Configure "12" button */
+                if (btn12)
+                {
+                    btn12->caption   = (uint8_t *)"12";
+                    btn12->font      = 16;
+                    btn12->bcfucolor = WHITE;
+                    btn12->bcfdcolor = BLACK;
+                    btn_draw(btn12);
+                }
+
+                /* Configure "16" button */
+                if (btn16)
+                {
+                    btn16->caption   = (uint8_t *)"16";
+                    btn16->font      = 16;
+                    btn16->bcfucolor = WHITE;
+                    btn16->bcfdcolor = BLACK;
+                    btn_draw(btn16);
+                }
+
+                /* Configure "24" button */
+                if (btn24)
+                {
+                    btn24->caption   = (uint8_t *)"24";
+                    btn24->font      = 16;
+                    btn24->bcfucolor = WHITE;
+                    btn24->bcfdcolor = BLACK;
+                    btn_draw(btn24);
+                }
+
+                /* Configure cancel button */
+                if (btn_cancel)
+                {
+                    btn_cancel->caption   = (uint8_t *)GUI_BACK_CAPTION_TBL[gui_phy.language];
+                    btn_cancel->font      = 16;
+                    btn_cancel->bcfucolor = WHITE;
+                    btn_cancel->bcfdcolor = BLACK;
+                    btn_draw(btn_cancel);
+                }
+
+                /* Modal input loop: block until selection or cancel */
+                while (!font_sel)
+                {
+                    tp_dev.scan(0);
+                    in_obj.get_key(&tp_dev, IN_TYPE_TOUCH);
+
+                    if (system_task_return)
+                    {
+                        break;  /* propagate to outer handler */
+                    }
+
+                    delay_ms(10);
+
+                    if (btn_check(btn12, &in_obj))
+                    { if ((btn12->sta & 0X80) == 0) font_sel = 12; }
+                    if (btn_check(btn16, &in_obj))
+                    { if ((btn16->sta & 0X80) == 0) font_sel = 16; }
+                    if (btn_check(btn24, &in_obj))
+                    { if ((btn24->sta & 0X80) == 0) font_sel = 24; }
+                    if (btn_check(btn_cancel, &in_obj))
+                    { if ((btn_cancel->sta & 0X80) == 0) break; }
+                }
+
+                /* Destroy dialog buttons */
+                btn_delete(btn12);
+                btn_delete(btn16);
+                btn_delete(btn24);
+                btn_delete(btn_cancel);
+
+                /* Apply font change or restore page */
+                if (font_sel)
+                {
+                    ctx->font_size  = (uint8_t)font_sel;
+                    ctx->text_height = ((lcddev.height - gui_phy.tbheight * 2 - 8)
+                                        / ctx->font_size) * ctx->font_size;
+                    ctx->prev_count = 0;
+                    ctx->page_num   = 1;
+                    ebook_scan_page_forward(ctx);
+                    ebook_draw_page(ctx);
+                    ebook_show_page_num(ctx);
+                }
+                else
+                {
+                    /* Restore page content (panel was drawn over it) */
+                    ebook_draw_page(ctx);
+                }
+
+                    swipe_tracking = 0;
+                    continue;
+                }
+            }
+
             /* ---- Check return button ---- */
             res = btn_check(rbtn, &in_obj);
             if (res && ((rbtn->sta & 0X80) == 0))
@@ -636,9 +791,9 @@ uint8_t ebook_play(void)
                     if (adx >= EBOOK_SWIPE_THRESH && adx > ady)
                     {
                         if (dx < 0)
-                            ebook_turn_page(ctx, 1);   /* swipe left ï¿??? next page */
+                            ebook_turn_page(ctx, 1);   /* swipe left ï¿½??? next page */
                         else
-                            ebook_turn_page(ctx, -1);  /* swipe right ï¿??? previous page */
+                            ebook_turn_page(ctx, -1);  /* swipe right ï¿½??? previous page */
                     }
 
                     swipe_tracking = 0;
@@ -662,6 +817,7 @@ uint8_t ebook_play(void)
 
     filelistbox_delete(flistbox);
     btn_delete(rbtn);
+    btn_delete(fbtn);
     ebook_ctx_deinit(ctx);
     gui_memin_free(pname);
     gui_memin_free(ebookinfo);
