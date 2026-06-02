@@ -1,0 +1,12 @@
+..\..\output\ds18b20.o: ..\..\Drivers\BSP\DS18B20\ds18b20.c
+..\..\output\ds18b20.o: ..\..\Drivers\./SYSTEM/delay/delay.h
+..\..\output\ds18b20.o: ..\..\Drivers\./SYSTEM/sys/sys.h
+..\..\output\ds18b20.o: ..\..\Drivers\CMSIS\Device\ST\STM32F1xx\Include\stm32f1xx.h
+..\..\output\ds18b20.o: ..\..\Drivers\CMSIS\Device\ST\STM32F1xx\Include\stm32f103xe.h
+..\..\output\ds18b20.o: ..\..\Drivers\CMSIS\Include\core_cm3.h
+..\..\output\ds18b20.o: D:\Keil_v5\ARM\ARMCC\Bin\..\include\stdint.h
+..\..\output\ds18b20.o: ..\..\Drivers\CMSIS\Include\cmsis_version.h
+..\..\output\ds18b20.o: ..\..\Drivers\CMSIS\Include\cmsis_compiler.h
+..\..\output\ds18b20.o: ..\..\Drivers\CMSIS\Include\cmsis_armcc.h
+..\..\output\ds18b20.o: ..\..\Drivers\CMSIS\Device\ST\STM32F1xx\Include\system_stm32f1xx.h
+..\..\output\ds18b20.o: ..\..\Drivers\./BSP/DS18B20/ds18b20.h

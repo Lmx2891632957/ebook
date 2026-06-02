@@ -1,0 +1,14 @@
+..\..\output\ch395q_cmd.o: ..\..\Drivers\BSP\CH395Q\ch395q_cmd.c
+..\..\output\ch395q_cmd.o: ..\..\Drivers\./BSP/CH395Q/ch395q_cmd.h
+..\..\output\ch395q_cmd.o: ..\..\Drivers\./SYSTEM/sys/sys.h
+..\..\output\ch395q_cmd.o: ..\..\Drivers\CMSIS\Device\ST\STM32F1xx\Include\stm32f1xx.h
+..\..\output\ch395q_cmd.o: ..\..\Drivers\CMSIS\Device\ST\STM32F1xx\Include\stm32f103xe.h
+..\..\output\ch395q_cmd.o: ..\..\Drivers\CMSIS\Include\core_cm3.h
+..\..\output\ch395q_cmd.o: D:\Keil_v5\ARM\ARMCC\Bin\..\include\stdint.h
+..\..\output\ch395q_cmd.o: ..\..\Drivers\CMSIS\Include\cmsis_version.h
+..\..\output\ch395q_cmd.o: ..\..\Drivers\CMSIS\Include\cmsis_compiler.h
+..\..\output\ch395q_cmd.o: ..\..\Drivers\CMSIS\Include\cmsis_armcc.h
+..\..\output\ch395q_cmd.o: ..\..\Drivers\CMSIS\Device\ST\STM32F1xx\Include\system_stm32f1xx.h
+..\..\output\ch395q_cmd.o: ..\..\Drivers\./BSP/CH395Q/ch395q.h
+..\..\output\ch395q_cmd.o: ..\..\Drivers\./BSP/SPI/spi.h
+..\..\output\ch395q_cmd.o: ..\..\Drivers\./SYSTEM/delay/delay.h

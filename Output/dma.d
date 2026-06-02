@@ -1,0 +1,12 @@
+..\..\output\dma.o: ..\..\Drivers\BSP\DMA\dma.c
+..\..\output\dma.o: ..\..\Drivers\./BSP/DMA/dma.h
+..\..\output\dma.o: ..\..\Drivers\./SYSTEM/sys/sys.h
+..\..\output\dma.o: ..\..\Drivers\CMSIS\Device\ST\STM32F1xx\Include\stm32f1xx.h
+..\..\output\dma.o: ..\..\Drivers\CMSIS\Device\ST\STM32F1xx\Include\stm32f103xe.h
+..\..\output\dma.o: ..\..\Drivers\CMSIS\Include\core_cm3.h
+..\..\output\dma.o: D:\Keil_v5\ARM\ARMCC\Bin\..\include\stdint.h
+..\..\output\dma.o: ..\..\Drivers\CMSIS\Include\cmsis_version.h
+..\..\output\dma.o: ..\..\Drivers\CMSIS\Include\cmsis_compiler.h
+..\..\output\dma.o: ..\..\Drivers\CMSIS\Include\cmsis_armcc.h
+..\..\output\dma.o: ..\..\Drivers\CMSIS\Device\ST\STM32F1xx\Include\system_stm32f1xx.h
+..\..\output\dma.o: ..\..\Drivers\./SYSTEM/delay/delay.h

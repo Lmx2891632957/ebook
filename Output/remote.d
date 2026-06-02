@@ -1,0 +1,14 @@
+..\..\output\remote.o: ..\..\Drivers\BSP\REMOTE\remote.c
+..\..\output\remote.o: ..\..\Drivers\./BSP/REMOTE/remote.h
+..\..\output\remote.o: ..\..\Drivers\./SYSTEM/sys/sys.h
+..\..\output\remote.o: ..\..\Drivers\CMSIS\Device\ST\STM32F1xx\Include\stm32f1xx.h
+..\..\output\remote.o: ..\..\Drivers\CMSIS\Device\ST\STM32F1xx\Include\stm32f103xe.h
+..\..\output\remote.o: ..\..\Drivers\CMSIS\Include\core_cm3.h
+..\..\output\remote.o: D:\Keil_v5\ARM\ARMCC\Bin\..\include\stdint.h
+..\..\output\remote.o: ..\..\Drivers\CMSIS\Include\cmsis_version.h
+..\..\output\remote.o: ..\..\Drivers\CMSIS\Include\cmsis_compiler.h
+..\..\output\remote.o: ..\..\Drivers\CMSIS\Include\cmsis_armcc.h
+..\..\output\remote.o: ..\..\Drivers\CMSIS\Device\ST\STM32F1xx\Include\system_stm32f1xx.h
+..\..\output\remote.o: ..\..\Drivers\./SYSTEM/delay/delay.h
+..\..\output\remote.o: ..\..\Drivers\./SYSTEM/usart/usart.h
+..\..\output\remote.o: D:\Keil_v5\ARM\ARMCC\Bin\..\include\stdio.h

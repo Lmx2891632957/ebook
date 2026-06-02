@@ -1,0 +1,11 @@
+..\..\output\spi.o: ..\..\Drivers\BSP\SPI\spi.c
+..\..\output\spi.o: ..\..\Drivers\./BSP/SPI/spi.h
+..\..\output\spi.o: ..\..\Drivers\./SYSTEM/sys/sys.h
+..\..\output\spi.o: ..\..\Drivers\CMSIS\Device\ST\STM32F1xx\Include\stm32f1xx.h
+..\..\output\spi.o: ..\..\Drivers\CMSIS\Device\ST\STM32F1xx\Include\stm32f103xe.h
+..\..\output\spi.o: ..\..\Drivers\CMSIS\Include\core_cm3.h
+..\..\output\spi.o: D:\Keil_v5\ARM\ARMCC\Bin\..\include\stdint.h
+..\..\output\spi.o: ..\..\Drivers\CMSIS\Include\cmsis_version.h
+..\..\output\spi.o: ..\..\Drivers\CMSIS\Include\cmsis_compiler.h
+..\..\output\spi.o: ..\..\Drivers\CMSIS\Include\cmsis_armcc.h
+..\..\output\spi.o: ..\..\Drivers\CMSIS\Device\ST\STM32F1xx\Include\system_stm32f1xx.h

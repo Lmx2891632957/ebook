@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(sed -i 's/\\(memox->width - MEMO_SCB_WIDTH\\) \\\\/ \\(memox->font/memox->width \\\\/ \\(memox->font/g' memo.c)",
+      "Bash(sed -i 's/memox->left + memox->width - MEMO_SCB_WIDTH/memox->left + memox->width/g' memo.c)",
+      "Bash(sed -i 's/uint16_t linelenth = memox->width - MEMO_SCB_WIDTH/uint16_t linelenth = memox->width/g' memo.c)",
+      "Bash(sed -i 's/memox->width - MEMO_SCB_WIDTH, memox->height, MEMO_DFT_TBKC/memox->width, memox->height, MEMO_DFT_TBKC/g' memo.c)",
+      "Bash(python fix_memo.py)"
+    ]
+  }
+}
