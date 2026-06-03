@@ -81,12 +81,15 @@ static uint8_t ebook_ctx_init(ebook_ctx_t *ctx, FIL *f_txt, uint8_t *pname, uint
  */
 static void ebook_ctx_deinit(ebook_ctx_t *ctx)
 {
+    if (!ctx) return;
     if (ctx->raw_buf)  { gui_memin_free(ctx->raw_buf);  ctx->raw_buf  = NULL; }
     if (ctx->page_buf) { gui_memin_free(ctx->page_buf); ctx->page_buf = NULL; }
+    if (ctx->bookmarks) { ebook_bm_free(ctx->bookmarks); ctx->bookmarks = NULL; }
     ctx->file_size  = 0;
     ctx->page_start = 0;
     ctx->page_end   = 0;
     ctx->page_num   = 0;
+    gui_memin_free(ctx);
 }
 
 /**
@@ -400,8 +403,7 @@ static uint8_t ebook_turn_page(ebook_ctx_t *ctx, int dir)
  */
 uint8_t ebook_play(void)
 {
-    ebook_ctx_t ctx_data;
-    ebook_ctx_t *ctx = &ctx_data;
+    ebook_ctx_t *ctx = NULL;  /* heap-allocated on book open, saves 216B on stack */
     FIL *f_txt;
     DIR ebookdir;
     FILINFO *ebookinfo;
@@ -416,6 +418,7 @@ uint8_t ebook_play(void)
 
     _btn_obj *rbtn;
     _btn_obj *fbtn;
+    _btn_obj *bbtn;
     _filelistbox_obj *flistbox;
     _filelistbox_list *filelistx;
 
@@ -475,6 +478,21 @@ uint8_t ebook_play(void)
         btn_draw(fbtn);
     }
 
+    /* Bookmark button - positioned to the left of font button */
+    bbtn = btn_creat(lcddev.width - 6 * gui_phy.tbfsize - 34,
+                     lcddev.height - gui_phy.tbheight,
+                     2 * gui_phy.tbfsize + 8, gui_phy.tbheight - 1,
+                     0, 0x03);
+
+    if (bbtn)
+    {
+        bbtn->caption   = (uint8_t *)"\xCA\xE9\xC7\xA9";   /* "书签" in GBK */
+        bbtn->font      = gui_phy.tbfsize;
+        bbtn->bcfdcolor = WHITE;
+        bbtn->bcfucolor = WHITE;
+        btn_draw(bbtn);
+    }
+
     buf = gui_memin_malloc(1024);
     if (!buf) rval = 1;
 
@@ -509,6 +527,7 @@ uint8_t ebook_play(void)
             {
                 /* Leave reading state, go back to file browsing */
                 ebook_ctx_deinit(ctx);
+                ctx = NULL;
                 gui_memin_free(pname);
                 pname = NULL;
                 ebooksta = 0;
@@ -573,9 +592,15 @@ uint8_t ebook_play(void)
                 rval = f_open(f_txt, (const TCHAR *)pname, FA_READ);
                 if (rval) break;
 
+                /* Allocate context on heap (saves ~216B on stack vs local struct) */
+                ctx = (ebook_ctx_t *)gui_memin_malloc(sizeof(ebook_ctx_t));
+                if (!ctx) { rval = 1; break; }
+
                 /* Initialize ebook context (stores f_txt pointer, allocates buffers) */
                 if (ebook_ctx_init(ctx, f_txt, pname, fn))
                 {
+                    gui_memin_free(ctx);
+                    ctx = NULL;
                     errtype = 1;
                     break;
                 }
@@ -588,10 +613,14 @@ uint8_t ebook_play(void)
                 ebook_draw_page(ctx);
                 ebook_show_page_num(ctx);
 
+                /* Load bookmarks for this book */
+                ctx->bookmarks = ebook_bm_load(pname);
+
                 system_task_return = 0;
                 flistbox->dbclick = 0;
                 ebooksta = 1;
                 btn_draw(fbtn);   /* ensure font button is visible */
+                btn_draw(bbtn);   /* ensure bookmark button is visible */
             }
         }
 
@@ -733,12 +762,469 @@ uint8_t ebook_play(void)
                 }
             }
 
+            /* ---- Check bookmark button ---- */
+            if (bbtn)
+            {
+                res = btn_check(bbtn, &in_obj);
+
+                if (res && ((bbtn->sta & 0X80) == 0))
+                {
+                    /* ================================================================
+                     *  Bookmark panel: two-level modal UI
+                     *  Panel 1: bookmark list management
+                     *  Panel 2: single bookmark operations (jump / delete / cancel)
+                     * ================================================================ */
+                    uint16_t bm_px, bm_py, bm_pw, bm_ph;
+                    uint16_t bm_title_y, bm_addbtn_y, bm_lby, bm_lbh, bm_backbtn_y;
+                    _btn_obj *bm_btn_add, *bm_btn_back;
+                    _listbox_obj *bm_lb;
+                    uint8_t  bm_panel1_run;
+                    uint8_t  bm_selected_idx;
+                    uint8_t *bm_item_names[EBOOK_BM_MAX];
+                    uint8_t  i;
+
+                    /* Init name pointer array */
+                    for (i = 0; i < EBOOK_BM_MAX; i++) bm_item_names[i] = NULL;
+
+                    /* Ensure bookmarks are loaded */
+                    if (!ctx->bookmarks)
+                    {
+                        ctx->bookmarks = ebook_bm_load(ctx->path);
+                    }
+
+                    /* ---- Panel 1: Bookmark Management ---- */
+                    bm_pw = 260;
+                    bm_lbh = 6 * gui_phy.listheight;  /* 6 visible rows */
+                    bm_ph  = 8 + (gui_phy.tbfsize + 4) + 6 + 36 + 6 + bm_lbh + 6 + 36 + 8;
+                    bm_px  = (lcddev.width  - bm_pw) / 2;
+                    bm_py  = (lcddev.height - bm_ph) / 2;
+
+                    bm_title_y   = bm_py + 8;
+                    bm_addbtn_y  = bm_title_y + gui_phy.tbfsize + 4 + 6;
+                    bm_lby       = bm_addbtn_y + 36 + 6;
+                    bm_backbtn_y = bm_lby + bm_lbh + 6;
+
+                    /* Draw panel background */
+                    gui_fill_rectangle(bm_px, bm_py, bm_pw, bm_ph, 0xC618);
+
+                    /* Draw title */
+                    gui_show_string((uint8_t *)"\xCA\xE9\xC7\xA9\xB9\xDC\xC0\xED",  /* "书签管理" */
+                                    bm_px + 8, bm_title_y,
+                                    bm_pw - 16, gui_phy.tbfsize,
+                                    gui_phy.tbfsize, WHITE);
+
+                    /* "Add bookmark" button */
+                    bm_btn_add = btn_creat(bm_px + 10, bm_addbtn_y,
+                                           bm_pw - 20, 36, 0, BTN_TYPE_ANG);
+                    if (bm_btn_add)
+                    {
+                        bm_btn_add->caption   = (uint8_t *)
+                            "\x2B\x20\xCC\xED\xBC\xD3\xB5\xB1\xC7\xB0\xD2\xB3\xCE\xAA\xCA\xE9\xC7\xA9";
+                            /* "+ 添加当前页为书签" */
+                        bm_btn_add->font      = gui_phy.tbfsize;
+                        bm_btn_add->bcfucolor = WHITE;
+                        bm_btn_add->bcfdcolor = BLACK;
+                        btn_draw(bm_btn_add);
+                    }
+
+                    /* Bookmark listbox */
+                    bm_lb = listbox_creat(bm_px + 10, bm_lby,
+                                          bm_pw - 20, bm_lbh,
+                                          1, gui_phy.listfsize);
+                    if (bm_lb && ctx->bookmarks)
+                    {
+                        for (i = 0; i < ctx->bookmarks->count; i++)
+                        {
+                            uint8_t tmp[8];
+                            bm_item_names[i] = gui_memin_malloc(32);
+                            if (bm_item_names[i])
+                            {
+                                strcpy((char *)bm_item_names[i], "\xCA\xE9\xC7\xA9");   /* "书签" */
+                                gui_num2str(tmp, i + 1);
+                                strcat((char *)bm_item_names[i], (char *)tmp);
+                                strcat((char *)bm_item_names[i], ": \xB5\xDA");         /* ": 第" */
+                                gui_num2str(tmp, ctx->bookmarks->entries[i].page_num);
+                                strcat((char *)bm_item_names[i], (char *)tmp);
+                                strcat((char *)bm_item_names[i], " \xD2\xB3");          /* " 页" */
+                                listbox_addlist(bm_lb, bm_item_names[i]);
+                            }
+                        }
+                        if (ctx->bookmarks->count > 0)
+                            listbox_draw_listbox(bm_lb);
+                    }
+
+                    /* "Return" button */
+                    bm_btn_back = btn_creat(bm_px + 10, bm_backbtn_y,
+                                            bm_pw - 20, 36, 0, BTN_TYPE_ANG);
+                    if (bm_btn_back)
+                    {
+                        bm_btn_back->caption   = (uint8_t *)GUI_BACK_CAPTION_TBL[gui_phy.language];
+                        bm_btn_back->font      = gui_phy.tbfsize;
+                        bm_btn_back->bcfucolor = WHITE;
+                        bm_btn_back->bcfdcolor = BLACK;
+                        btn_draw(bm_btn_back);
+                    }
+
+                    /* ============================================================
+                     *  Panel 1 modal loop
+                     * ============================================================ */
+                    bm_panel1_run = 1;
+                    while (bm_panel1_run)
+                    {
+                        tp_dev.scan(0);
+                        in_obj.get_key(&tp_dev, IN_TYPE_TOUCH);
+
+                        if (system_task_return)
+                        {
+                            bm_panel1_run = 0;
+                            break;
+                        }
+
+                        delay_ms(10);
+
+                        /* --- "Add bookmark" button --- */
+                        if (bm_btn_add && btn_check(bm_btn_add, &in_obj))
+                        {
+                            if ((bm_btn_add->sta & 0X80) == 0)
+                            {
+                                uint8_t add_r = ebook_bm_add(ctx->bookmarks,
+                                                              ctx->page_start,
+                                                              ctx->page_num);
+                                if (add_r == 0)
+                                {
+                                    /* Success: save and rebuild listbox */
+                                    ebook_bm_save(ctx->bookmarks);
+
+                                    /* Free old listbox and names */
+                                    if (bm_lb)
+                                    {
+                                        for (i = 0; i < EBOOK_BM_MAX; i++)
+                                        {
+                                            if (bm_item_names[i])
+                                            { gui_memin_free(bm_item_names[i]); bm_item_names[i] = NULL; }
+                                        }
+                                        listbox_delete(bm_lb);
+                                    }
+
+                                    /* Recreate listbox */
+                                    bm_lb = listbox_creat(bm_px + 10, bm_lby,
+                                                          bm_pw - 20, bm_lbh,
+                                                          1, gui_phy.listfsize);
+                                    if (bm_lb)
+                                    {
+                                        for (i = 0; i < ctx->bookmarks->count; i++)
+                                        {
+                                            uint8_t tmp[8];
+                                            bm_item_names[i] = gui_memin_malloc(32);
+                                            if (bm_item_names[i])
+                                            {
+                                                strcpy((char *)bm_item_names[i], "\xCA\xE9\xC7\xA9");   /* "书签" */
+                                                gui_num2str(tmp, i + 1);
+                                                strcat((char *)bm_item_names[i], (char *)tmp);
+                                                strcat((char *)bm_item_names[i], ": \xB5\xDA");
+                                                gui_num2str(tmp,
+                                                    ctx->bookmarks->entries[i].page_num);
+                                                strcat((char *)bm_item_names[i], (char *)tmp);
+                                                strcat((char *)bm_item_names[i], " \xD2\xB3");
+                                                listbox_addlist(bm_lb, bm_item_names[i]);
+                                            }
+                                        }
+                                        if (ctx->bookmarks->count > 0)
+                                            listbox_draw_listbox(bm_lb);
+                                    }
+                                }
+                                else if (add_r == 1)
+                                {
+                                    /* Bookmark list full: show toast */
+                                    gui_show_string(
+                                        (uint8_t *)
+                                        "\xCA\xE9\xC7\xA9\xD2\xD1\xC2\xFA\x28\xD7\xEE\xB6\xE0\x31\x30\xB8\xF6\x29",
+                                        /* "书签已满(最多10个)" */
+                                        bm_px + 10, bm_py + bm_ph - 28,
+                                        bm_pw - 20, gui_phy.tbfsize,
+                                        gui_phy.tbfsize, BLACK);
+                                    delay_ms(800);
+                                    gui_fill_rectangle(bm_px + 10, bm_py + bm_ph - 28,
+                                                       bm_pw - 20, gui_phy.tbfsize, 0xC618);
+                                }
+                                else if (add_r == 2)
+                                {
+                                    /* Already exists: show toast */
+                                    gui_show_string(
+                                        (uint8_t *)
+                                        "\xB8\xC3\xCA\xE9\xC7\xA9\xD2\xD1\xB4\xE6\xD4\xDA",
+                                        /* "该书签已存在" */
+                                        bm_px + 10, bm_py + bm_ph - 28,
+                                        bm_pw - 20, gui_phy.tbfsize,
+                                        gui_phy.tbfsize, BLACK);
+                                    delay_ms(800);
+                                    gui_fill_rectangle(bm_px + 10, bm_py + bm_ph - 28,
+                                                       bm_pw - 20, gui_phy.tbfsize, 0xC618);
+                                }
+                            }
+                        }
+
+                        /* --- Listbox: double-click a bookmark item --- */
+                        if (bm_lb && ctx->bookmarks->count > 0)
+                        {
+                            listbox_check(bm_lb, &in_obj);
+
+                            if (bm_lb->dbclick & 0x80)
+                            {
+                                bm_selected_idx = bm_lb->selindex;
+
+                                if (bm_selected_idx < ctx->bookmarks->count)
+                                {
+                                    /* ============================================
+                                     *  Panel 2: Bookmark Operation
+                                     * ============================================ */
+                                    uint16_t p2_w, p2_h, p2_x, p2_y;
+                                    uint16_t p2_title_y, p2_info_y, p2_btn1_y,
+                                             p2_btn2_y, p2_btn3_y;
+                                    _btn_obj *p2_btn_jump, *p2_btn_del, *p2_btn_cancel;
+                                    uint8_t  p2_run;
+                                    uint8_t  p2_info[32];
+
+                                    p2_w = 220;
+                                    p2_h = 8 + (gui_phy.tbfsize + 4) + 8
+                                           + gui_phy.tbfsize + 8
+                                           + 36 + 6 + 36 + 6 + 36 + 8;
+                                    p2_x = (lcddev.width  - p2_w) / 2;
+                                    p2_y = (lcddev.height - p2_h) / 2;
+
+                                    p2_title_y  = p2_y + 8;
+                                    p2_info_y   = p2_title_y + gui_phy.tbfsize + 4 + 8;
+                                    p2_btn1_y   = p2_info_y + gui_phy.tbfsize + 8;
+                                    p2_btn2_y   = p2_btn1_y + 36 + 6;
+                                    p2_btn3_y   = p2_btn2_y + 36 + 6;
+
+                                    /* Draw panel 2 background */
+                                    gui_fill_rectangle(p2_x, p2_y, p2_w, p2_h, 0xC618);
+
+                                    /* Title */
+                                    gui_show_string(
+                                        (uint8_t *)
+                                        "\xCA\xE9\xC7\xA9\xB2\xD9\xD7\xF7",  /* "书签操作" */
+                                        p2_x + 8, p2_title_y,
+                                        p2_w - 16, gui_phy.tbfsize,
+                                        gui_phy.tbfsize, WHITE);
+
+                                    /* Bookmark info text */
+                                    {
+                                        uint8_t tmp2[8];
+                                        strcpy((char *)p2_info, "\xCA\xE9\xC7\xA9");     /* "书签" */
+                                        strcat((char *)p2_info,
+                                               (char *)gui_num2str(tmp2, bm_selected_idx + 1));
+                                        strcat((char *)p2_info, ": \xB5\xDA");             /* ": 第" */
+                                        strcat((char *)p2_info,
+                                               (char *)gui_num2str(tmp2,
+                                                   ctx->bookmarks->entries[bm_selected_idx].page_num));
+                                        strcat((char *)p2_info, " \xD2\xB3");              /* " 页" */
+                                    }
+                                    gui_show_string(p2_info,
+                                                    p2_x + 8, p2_info_y,
+                                                    p2_w - 16, gui_phy.tbfsize,
+                                                    gui_phy.tbfsize, WHITE);
+
+                                    /* "Jump to here" button */
+                                    p2_btn_jump = btn_creat(p2_x + 10, p2_btn1_y,
+                                                            p2_w - 20, 36, 0, BTN_TYPE_ANG);
+                                    if (p2_btn_jump)
+                                    {
+                                        p2_btn_jump->caption   = (uint8_t *)
+                                            "\xCC\xF8\xD7\xAA\xB5\xBD\xB4\xCB\xB4\xA6";
+                                            /* "跳转到此处" */
+                                        p2_btn_jump->font      = gui_phy.tbfsize;
+                                        p2_btn_jump->bcfucolor = WHITE;
+                                        p2_btn_jump->bcfdcolor = BLACK;
+                                        btn_draw(p2_btn_jump);
+                                    }
+
+                                    /* "Delete this bookmark" button */
+                                    p2_btn_del = btn_creat(p2_x + 10, p2_btn2_y,
+                                                           p2_w - 20, 36, 0, BTN_TYPE_ANG);
+                                    if (p2_btn_del)
+                                    {
+                                        p2_btn_del->caption   = (uint8_t *)
+                                            "\xC9\xBE\xB3\xFD\xB4\xCB\xCA\xE9\xC7\xA9";
+                                            /* "删除此书签" */
+                                        p2_btn_del->font      = gui_phy.tbfsize;
+                                        p2_btn_del->bcfucolor = WHITE;
+                                        p2_btn_del->bcfdcolor = BLACK;
+                                        btn_draw(p2_btn_del);
+                                    }
+
+                                    /* "Cancel" button */
+                                    p2_btn_cancel = btn_creat(p2_x + 10, p2_btn3_y,
+                                                              p2_w - 20, 36, 0, BTN_TYPE_ANG);
+                                    if (p2_btn_cancel)
+                                    {
+                                        p2_btn_cancel->caption   = (uint8_t *)
+                                            GUI_BACK_CAPTION_TBL[gui_phy.language];
+                                        p2_btn_cancel->font      = gui_phy.tbfsize;
+                                        p2_btn_cancel->bcfucolor = WHITE;
+                                        p2_btn_cancel->bcfdcolor = BLACK;
+                                        btn_draw(p2_btn_cancel);
+                                    }
+
+                                    /* ---- Panel 2 modal loop ---- */
+                                    p2_run = 1;
+                                    while (p2_run)
+                                    {
+                                        tp_dev.scan(0);
+                                        in_obj.get_key(&tp_dev, IN_TYPE_TOUCH);
+
+                                        if (system_task_return)
+                                        {
+                                            p2_run = 0;
+                                            bm_panel1_run = 0;
+                                            break;
+                                        }
+
+                                        delay_ms(10);
+
+                                        /* Jump to bookmark */
+                                        if (p2_btn_jump
+                                                && btn_check(p2_btn_jump, &in_obj))
+                                        {
+                                            if ((p2_btn_jump->sta & 0X80) == 0)
+                                            {
+                                                /* Seek to bookmarked position */
+                                                ctx->page_start =
+                                                    ctx->bookmarks->entries[bm_selected_idx].file_offset;
+                                                ctx->prev_count = 0;
+                                                ctx->page_num   =
+                                                    ctx->bookmarks->entries[bm_selected_idx].page_num;
+                                                ebook_scan_page_forward(ctx);
+                                                ebook_draw_page(ctx);
+                                                ebook_show_page_num(ctx);
+                                                p2_run = 0;
+                                                bm_panel1_run = 0;
+                                            }
+                                        }
+
+                                        /* Delete bookmark */
+                                        if (p2_btn_del
+                                                && btn_check(p2_btn_del, &in_obj))
+                                        {
+                                            if ((p2_btn_del->sta & 0X80) == 0)
+                                            {
+                                                ebook_bm_delete(ctx->bookmarks, bm_selected_idx);
+                                                ebook_bm_save(ctx->bookmarks);
+                                                p2_run = 0;
+                                                /* back to panel 1, which will rebuild listbox */
+                                            }
+                                        }
+
+                                        /* Cancel - back to panel 1 */
+                                        if (p2_btn_cancel
+                                                && btn_check(p2_btn_cancel, &in_obj))
+                                        {
+                                            if ((p2_btn_cancel->sta & 0X80) == 0)
+                                            {
+                                                p2_run = 0;
+                                            }
+                                        }
+                                    }
+
+                                    /* Cleanup panel 2 */
+                                    btn_delete(p2_btn_jump);
+                                    btn_delete(p2_btn_del);
+                                    btn_delete(p2_btn_cancel);
+
+                                    /* Redraw panel 1 background (panel 2 was drawn on top) */
+                                    gui_fill_rectangle(bm_px, bm_py, bm_pw, bm_ph, 0xC618);
+                                    gui_show_string((uint8_t *)
+                                        "\xCA\xE9\xC7\xA9\xB9\xDC\xC0\xED",  /* "书签管理" */
+                                        bm_px + 8, bm_title_y,
+                                        bm_pw - 16, gui_phy.tbfsize,
+                                        gui_phy.tbfsize, WHITE);
+                                    if (bm_btn_add) btn_draw(bm_btn_add);
+                                    if (bm_btn_back) btn_draw(bm_btn_back);
+
+                                    /* Only rebuild listbox if Panel 1 will continue running.
+                                     * When jumping (bm_panel1_run == 0), skip rebuild --
+                                     * Panel 1 cleanup will free everything immediately. */
+                                    if (bm_panel1_run)
+                                    {
+                                        if (bm_lb)
+                                        {
+                                            for (i = 0; i < EBOOK_BM_MAX; i++)
+                                            {
+                                                if (bm_item_names[i])
+                                                { gui_memin_free(bm_item_names[i]); bm_item_names[i] = NULL; }
+                                            }
+                                            listbox_delete(bm_lb);
+                                        }
+                                        bm_lb = listbox_creat(bm_px + 10, bm_lby,
+                                                              bm_pw - 20, bm_lbh,
+                                                              1, gui_phy.listfsize);
+                                        if (bm_lb)
+                                        {
+                                            for (i = 0; i < ctx->bookmarks->count; i++)
+                                            {
+                                                uint8_t tmp[8];
+                                                bm_item_names[i] = gui_memin_malloc(32);
+                                                if (bm_item_names[i])
+                                                {
+                                                    strcpy((char *)bm_item_names[i], "\xCA\xE9\xC7\xA9");   /* "书签" */
+                                                    gui_num2str(tmp, i + 1);
+                                                    strcat((char *)bm_item_names[i], (char *)tmp);
+                                                    strcat((char *)bm_item_names[i], ": \xB5\xDA");
+                                                    gui_num2str(tmp,
+                                                        ctx->bookmarks->entries[i].page_num);
+                                                    strcat((char *)bm_item_names[i], (char *)tmp);
+                                                    strcat((char *)bm_item_names[i], " \xD2\xB3");
+                                                    listbox_addlist(bm_lb, bm_item_names[i]);
+                                                }
+                                            }
+                                            if (ctx->bookmarks->count > 0)
+                                                listbox_draw_listbox(bm_lb);
+
+                                            bm_lb->dbclick = 0;
+                                        }
+                                    }
+                                }  /* end if valid index */
+                            }  /* end if dbclick */
+                        }  /* end if bm_lb */
+
+                        /* --- "Return" button --- */
+                        if (bm_btn_back && btn_check(bm_btn_back, &in_obj))
+                        {
+                            if ((bm_btn_back->sta & 0X80) == 0)
+                            {
+                                bm_panel1_run = 0;
+                            }
+                        }
+                    }  /* end while panel 1 */
+
+                    /* ---- Cleanup panel 1 ---- */
+                    btn_delete(bm_btn_add);
+                    btn_delete(bm_btn_back);
+                    if (bm_lb)
+                    {
+                        for (i = 0; i < EBOOK_BM_MAX; i++)
+                        {
+                            if (bm_item_names[i]) gui_memin_free(bm_item_names[i]);
+                        }
+                        listbox_delete(bm_lb);
+                    }
+
+                    /* Restore reading page */
+                    ebook_draw_page(ctx);
+                    ebook_show_page_num(ctx);
+                    swipe_tracking = 0;
+                    continue;
+                }
+            }
+
             /* ---- Check return button ---- */
             res = btn_check(rbtn, &in_obj);
             if (res && ((rbtn->sta & 0X80) == 0))
             {
                 /* Return to file browsing */
                 ebook_ctx_deinit(ctx);
+                ctx = NULL;
                 gui_memin_free(pname);
                 pname = NULL;
                 ebooksta = 0;
@@ -818,6 +1304,7 @@ uint8_t ebook_play(void)
     filelistbox_delete(flistbox);
     btn_delete(rbtn);
     btn_delete(fbtn);
+    btn_delete(bbtn);
     ebook_ctx_deinit(ctx);
     gui_memin_free(pname);
     gui_memin_free(ebookinfo);

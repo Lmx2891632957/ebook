@@ -201,7 +201,7 @@ uint8_t listbox_check(_listbox_obj *listbox, void *in_key)
 
                 tempindex = listbox->sta & 0x3f; /* 得到当前sta种的位置 */
 
-                if (listbox->top <= key->y && key->y <= (listbox->top + listbox->height) && listbox->left <= key->x && key->x < (endx)) /* 在items区域内 */
+                if ((key->ksta & 0x01) && listbox->top <= key->y && key->y <= (listbox->top + listbox->height) && listbox->left <= key->x && key->x < (endx)) /* 在items区域内 */
                 {
                     /* itemperpage最大不能超过64!(按20一个index设计,这样64个list可以支持到64*20=1280垂直像素的屏) */
                     for (i = 0; i < listbox->scbv->itemsperpage; i++) /* 找到当前触屏按下的坐标在listbox种的index */

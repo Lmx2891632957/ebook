@@ -13,6 +13,7 @@
 #define __EBOOK_H
 
 #include "common.h"
+#include "ebook_bookmark.h"
 
 #define EBOOK_RAW_BUF_SIZE  4096    /* file read chunk size (one page ~1KB, 4KB enough) */
 #define EBOOK_PREV_MAX      40      /* max previous page offsets stored */
@@ -44,6 +45,8 @@ typedef struct {
     uint8_t *page_buf;               /* page render buffer */
     uint8_t *path;                   /* full file path */
     uint8_t *fname;                  /* display name (filename only) */
+
+    ebook_bm_book_t *bookmarks;      /* bookmark set for current book (NULL if not loaded) */
 } ebook_ctx_t;
 
 uint8_t ebook_play(void);            /* main entry point */

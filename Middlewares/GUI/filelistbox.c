@@ -271,7 +271,7 @@ uint8_t filelistbox_check(_filelistbox_obj *filelistbox, void *in_key)
 
                 tempindex = filelistbox->sta & 0x3f; /* 得到当前sta中的位置 */
 
-                if ((filelistbox->top + gui_phy.listheight) <= key->y && key->y <= (filelistbox->top + filelistbox->height - gui_phy.listheight) && filelistbox->left <= key->x && key->x < (endx))   /* 在items区域内 */
+                if ((key->ksta & 0x01) && (filelistbox->top + gui_phy.listheight) <= key->y && key->y <= (filelistbox->top + filelistbox->height - gui_phy.listheight) && filelistbox->left <= key->x && key->x < (endx))   /* 在items区域内 */
                 {
                     /* itemperpage最大不能超过64!(按20一个index设计,这样64个list可以支持到64*20=1280垂直像素的屏) */
                     for (i = 0; i < filelistbox->scbv->itemsperpage; i++)   /* 找到当前触屏按下的坐标在listbox种的index */

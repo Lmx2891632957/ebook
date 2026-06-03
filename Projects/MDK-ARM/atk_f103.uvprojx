@@ -10,7 +10,7 @@
       <TargetName>TEST</TargetName>
       <ToolsetNumber>0x4</ToolsetNumber>
       <ToolsetName>ARM-ADS</ToolsetName>
-      <pCCUsed>5060960::V5.06 update 7 (build 960)::.\ARMCC</pCCUsed>
+      <pCCUsed>5060528::V5.06 update 5 (build 528)::ARMCC</pCCUsed>
       <uAC6>0</uAC6>
       <TargetOption>
         <TargetCommonOption>
@@ -429,6 +429,11 @@
               <FileName>appplay.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\User\APP\appplay.c</FilePath>
+            </File>
+            <File>
+              <FileName>ebook_bookmark.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\User\APP\ebook_bookmark.c</FilePath>
             </File>
           </Files>
         </Group>
