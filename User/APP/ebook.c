@@ -1013,12 +1013,12 @@ uint8_t ebook_play(void)
                                     {
                                         uint8_t tmp2[8];
                                         strcpy((char *)p2_info, "\xCA\xE9\xC7\xA9");     /* "书签" */
-                                        strcat((char *)p2_info,
-                                               (char *)gui_num2str(tmp2, bm_selected_idx + 1));
+                                        gui_num2str(tmp2, bm_selected_idx + 1);
+                                        strcat((char *)p2_info, (char *)tmp2);
                                         strcat((char *)p2_info, ": \xB5\xDA");             /* ": 第" */
-                                        strcat((char *)p2_info,
-                                               (char *)gui_num2str(tmp2,
-                                                   ctx->bookmarks->entries[bm_selected_idx].page_num));
+                                        gui_num2str(tmp2,
+                                                   ctx->bookmarks->entries[bm_selected_idx].page_num);
+                                        strcat((char *)p2_info, (char *)tmp2);
                                         strcat((char *)p2_info, " \xD2\xB3");              /* " 页" */
                                     }
                                     gui_show_string(p2_info,
@@ -1127,26 +1127,28 @@ uint8_t ebook_play(void)
                                         }
                                     }
 
-                                    /* Cleanup panel 2 */
+                                    /* Cleanup panel 2: buttons always freed */
                                     btn_delete(p2_btn_jump);
                                     btn_delete(p2_btn_del);
                                     btn_delete(p2_btn_cancel);
 
-                                    /* Redraw panel 1 background (panel 2 was drawn on top) */
-                                    gui_fill_rectangle(bm_px, bm_py, bm_pw, bm_ph, 0xC618);
-                                    gui_show_string((uint8_t *)
-                                        "\xCA\xE9\xC7\xA9\xB9\xDC\xC0\xED",  /* "书签管理" */
-                                        bm_px + 8, bm_title_y,
-                                        bm_pw - 16, gui_phy.tbfsize,
-                                        gui_phy.tbfsize, WHITE);
-                                    if (bm_btn_add) btn_draw(bm_btn_add);
-                                    if (bm_btn_back) btn_draw(bm_btn_back);
-
-                                    /* Only rebuild listbox if Panel 1 will continue running.
-                                     * When jumping (bm_panel1_run == 0), skip rebuild --
-                                     * Panel 1 cleanup will free everything immediately. */
+                                    /* Only redraw Panel 1 + rebuild listbox if Panel 1 will
+                                     * continue running (delete/cancel). When jumping
+                                     * (bm_panel1_run == 0), skip everything -- Panel 1
+                                     * cleanup will free resources and ebook_draw_page()
+                                     * will restore the reading page immediately. */
                                     if (bm_panel1_run)
                                     {
+                                        gui_fill_rectangle(bm_px, bm_py, bm_pw, bm_ph, 0xC618);
+                                        gui_show_string((uint8_t *)
+                                            "\xCA\xE9\xC7\xA9\xB9\xDC\xC0\xED",  /* "书签管理" */
+                                            bm_px + 8, bm_title_y,
+                                            bm_pw - 16, gui_phy.tbfsize,
+                                            gui_phy.tbfsize, WHITE);
+                                        if (bm_btn_add) btn_draw(bm_btn_add);
+                                        if (bm_btn_back) btn_draw(bm_btn_back);
+
+                                        /* Rebuild listbox (may have changed due to delete) */
                                         if (bm_lb)
                                         {
                                             for (i = 0; i < EBOOK_BM_MAX; i++)
