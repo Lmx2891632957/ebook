@@ -37,6 +37,7 @@ typedef struct {
     uint16_t text_y;                 /* text area top */
     uint8_t  font_size;              /* font size: 12, 16, 24, or 32 */
     uint8_t  bg_mode;                /* 背景模式: 0=正常(白色), 1=护眼(浅黄) */
+    uint8_t  bl_level;               /* 亮度档位: 1=暗, 2=中(默认), 3=亮      */
 
     /* page offset history for backward navigation */
     uint32_t prev_starts[EBOOK_PREV_MAX];

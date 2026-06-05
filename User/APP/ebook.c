@@ -46,6 +46,133 @@ uint8_t *const ebook_remind_msg_tbl[GUI_LANGUAGE_NUM] =
 
 /* Defined in settings.c */
 
+/* ========================================================================
+ *  Software PWM for LCD backlight (PC10)
+ *
+ *  STM32F103RCT6: PC10 has NO timer AF function (only USART3_TX).
+ *  Hardware PWM is IMPOSSIBLE on this pin — use TIM3 interrupt +
+ *  GPIO bit-banging instead.
+ *
+ *  Design:
+ *    TIM3 @ 3kHz ISR → 3-step sub-counter → ~1kHz effective PWM
+ *    Level 1 (dim):  1/3 = 33% duty
+ *    Level 2 (mid):  2/3 = 67% duty
+ *    Level 3 (bri):  3/3 = 100% (always ON)
+ *
+ *  PC10 always stays in GPIO output mode — NEVER switched to AF.
+ * ======================================================================== */
+
+static volatile uint8_t sw_bl_pwm_cnt;     /* 0,1,2 cyclically */
+static volatile uint8_t sw_bl_pwm_level;   /* 1=dim, 2=mid, 3=bright */
+
+/**
+ * @brief       TIM3 interrupt handler — software PWM for LCD backlight
+ * @param       None
+ * @retval      None
+ * @note        ISR rate ≈ 3kHz (PSC=71, ARR=332).
+ *              3-step counter gives ~1kHz effective PWM — flicker-free.
+ */
+void TIM3_IRQHandler(void)
+{
+    if (TIM3->SR & (1 << 0))          /* UIF: update interrupt */
+    {
+        TIM3->SR &= ~(uint16_t)(1 << 0);  /* clear UIF */
+
+        if (sw_bl_pwm_level >= 3)
+        {
+            LCD_BL(1);                /* 100% — always ON */
+        }
+        else
+        {
+            sw_bl_pwm_cnt++;
+            if (sw_bl_pwm_cnt >= 3) sw_bl_pwm_cnt = 0;
+
+            if (sw_bl_pwm_level >= 2)      /* mid: 66% */
+                LCD_BL(sw_bl_pwm_cnt < 2 ? 1 : 0);
+            else                            /* dim: 33% */
+                LCD_BL(sw_bl_pwm_cnt == 0 ? 1 : 0);
+        }
+    }
+}
+
+/**
+ * @brief       Initialize software PWM for LCD backlight on PC10
+ * @param       None
+ * @retval      None
+ * @note        PC10 stays GPIO output — never switched to AF.
+ *              TIM3 generates update interrupts at ~3kHz.
+ *              ISR toggles PC10 in software to emulate PWM.
+ */
+static void lcd_bl_pwm_init(void)
+{
+    /* 1. Enable clocks */
+    RCC->APB2ENR |= 1 << 4;   /* GPIOC clock */
+    RCC->APB1ENR |= 1 << 1;   /* TIM3 clock  */
+
+    /* 2. Ensure PC10 is GPIO output push-pull (keep original mode) */
+    sys_gpio_set(GPIOC, SYS_GPIO_PIN10,
+                 SYS_GPIO_MODE_OUT, SYS_GPIO_OTYPE_PP,
+                 SYS_GPIO_SPEED_HIGH, SYS_GPIO_PUPD_PU);
+    LCD_BL(1);                      /* start with backlight ON */
+
+    /* 3. Configure TIM3 for ~3kHz update interrupt */
+    TIM3->PSC  = 71;                /* 72MHz / 72 = 1MHz timer clock */
+    TIM3->ARR  = 332;               /* 1MHz / 333 ≈ 3003 Hz ISR rate */
+    TIM3->DIER |= 1 << 0;           /* UIE = 1: enable update interrupt */
+    TIM3->CR1  |= 1 << 7;           /* ARPE: auto-reload preload enable */
+
+    /* 4. Enable TIM3 IRQ in NVIC — lowest priority, safe for μC/OS-II */
+    NVIC_SetPriority(TIM3_IRQn, 15);
+    NVIC_EnableIRQ(TIM3_IRQn);
+
+    /* 5. Initialize software PWM state */
+    sw_bl_pwm_cnt   = 0;
+    sw_bl_pwm_level = 2;            /* default mid brightness */
+
+    /* 6. Start TIM3 */
+    TIM3->CR1 |= 1 << 0;            /* CEN = 1 */
+}
+
+/**
+ * @brief       Set LCD backlight brightness level (software PWM)
+ * @param       level: 0=off, 1=dim(33%), 2=mid(66%), 3=bright(100%)
+ * @retval      None
+ */
+static void lcd_bl_set_brightness(uint8_t level)
+{
+    if (level == 0)
+    {
+        /* Off: stop timer, kill backlight */
+        TIM3->CR1 &= ~(uint16_t)(1 << 0);   /* CEN = 0 */
+        LCD_BL(0);
+        sw_bl_pwm_level = 0;
+    }
+    else if (level > 3)
+    {
+        level = 3;
+    }
+
+    if (level > 0)
+    {
+        sw_bl_pwm_level = level;
+
+        /* 100% brightness: stop timer, just drive GPIO high */
+        if (level >= 3)
+        {
+            TIM3->CR1 &= ~(uint16_t)(1 << 0);   /* stop timer */
+            LCD_BL(1);
+        }
+        else
+        {
+            /* Ensure timer is running for PWM levels 1-2 */
+            if (!(TIM3->CR1 & (1 << 0)))
+            {
+                TIM3->CR1 |= 1 << 0;            /* restart timer */
+            }
+        }
+    }
+}
+
 /**
  * @brief       Initialize ebook reader context
  * @param       ctx     : pointer to context struct
@@ -87,6 +214,8 @@ static uint8_t ebook_ctx_init(ebook_ctx_t *ctx, FIL *f_txt, uint8_t *pname, uint
 
     if (!ctx->raw_buf || !ctx->page_buf) return 1;
 
+    ctx->bl_level = 2;    /* 默认中档亮度 */
+
     return 0;
 }
 
@@ -98,6 +227,11 @@ static uint8_t ebook_ctx_init(ebook_ctx_t *ctx, FIL *f_txt, uint8_t *pname, uint
 static void ebook_ctx_deinit(ebook_ctx_t *ctx)
 {
     g_ebook_prgb = NULL;  /* 安全：确保静态指针不会悬空 */
+    /* Disable software backlight PWM — stop ISR + timer, keep backlight ON */
+    NVIC_DisableIRQ(TIM3_IRQn);
+    TIM3->DIER &= ~(uint16_t)(1 << 0);   /* UIE = 0 */
+    TIM3->CR1  &= ~(uint16_t)(1 << 0);   /* CEN = 0 */
+    LCD_BL(1);                            /* restore GPIO backlight ON for file browser */
     if (!ctx) return;
     if (ctx->raw_buf)  { gui_memin_free(ctx->raw_buf);  ctx->raw_buf  = NULL; }
     if (ctx->page_buf) { gui_memin_free(ctx->page_buf); ctx->page_buf = NULL; }
@@ -490,6 +624,7 @@ uint8_t ebook_play(void)
     _btn_obj *fbtn;
     _btn_obj *bbtn;
     _btn_obj *ebtn;
+    _btn_obj *brbtn;             /* 亮度按钮 */
     _progressbar_obj *prgb = NULL;   /* 进度条 */
     uint8_t  prgb_dragging = 0;      /* 拖拽状态标记：1=正在拖拽进度条 */
     uint16_t prgb_y;                 /* 进度条 Y 坐标（在创建时计算） */
@@ -581,6 +716,21 @@ uint8_t ebook_play(void)
         btn_draw(ebtn);
     }
 
+    /* Brightness button - positioned to the left of eye-care button */
+    brbtn = btn_creat(lcddev.width - 10 * gui_phy.tbfsize - 60,
+                      lcddev.height - gui_phy.tbheight,
+                      2 * gui_phy.tbfsize + 8, gui_phy.tbheight - 1,
+                      0, 0x03);
+
+    if (brbtn)
+    {
+        brbtn->caption   = (uint8_t *)"\xC1\xC1\xB6\xC8";   /* "亮度" in GBK */
+        brbtn->font      = gui_phy.tbfsize;
+        brbtn->bcfdcolor = WHITE;
+        brbtn->bcfucolor = WHITE;
+        btn_draw(brbtn);
+    }
+
     buf = gui_memin_malloc(1024);
     if (!buf) rval = 1;
 
@@ -615,6 +765,11 @@ uint8_t ebook_play(void)
             {
                 /* Leave reading state, go back to file browsing */
                 if (prgb) { progressbar_delete(prgb); prgb = NULL; }
+                /* Disable software backlight PWM before returning to browse */
+                NVIC_DisableIRQ(TIM3_IRQn);
+                TIM3->DIER &= ~(uint16_t)(1 << 0);   /* UIE = 0 */
+                TIM3->CR1  &= ~(uint16_t)(1 << 0);   /* CEN = 0 */
+                LCD_BL(1);
                 g_ebook_prgb = NULL;
                 ebook_ctx_deinit(ctx);
                 ctx = NULL;
@@ -709,9 +864,12 @@ uint8_t ebook_play(void)
                 system_task_return = 0;
                 flistbox->dbclick = 0;
                 ebooksta = 1;
+                lcd_bl_pwm_init();                       /* 启动背光 PWM */
+                lcd_bl_set_brightness(ctx->bl_level);    /* 应用亮度档位 */
                 btn_draw(fbtn);   /* ensure font button is visible */
                 btn_draw(bbtn);   /* ensure bookmark button is visible */
                 btn_draw(ebtn);   /* ensure eye-care button is visible */
+                btn_draw(brbtn);  /* ensure brightness button is visible */
 
                 /* Create progress bar */
                 prgb_y = lcddev.height - gui_phy.tbheight
@@ -1354,6 +1512,130 @@ uint8_t ebook_play(void)
                 }
             }
 
+            /* ---- Check brightness button ---- */
+            if (brbtn)
+            {
+                res = btn_check(brbtn, &in_obj);
+
+                if (res && ((brbtn->sta & 0X80) == 0))
+                {
+                    uint16_t panel_x, panel_y;
+                    uint8_t  bright_sel = 0;
+                    _btn_obj *br_btn_dim, *br_btn_mid, *br_btn_bri, *br_btn_cancel;
+
+                    panel_x = (lcddev.width
+                               - (3 * FONT_SEL_BTN_W + 4 * FONT_SEL_PAD)) / 2;
+                    panel_y = lcddev.height / 3;
+
+                    /* Draw panel background */
+                    gui_fill_rectangle(panel_x, panel_y,
+                                       3 * FONT_SEL_BTN_W + 4 * FONT_SEL_PAD,
+                                       FONT_SEL_BTN_H + 36 + 3 * FONT_SEL_PAD,
+                                       0xC618);
+
+                    /* Create brightness level buttons */
+                    br_btn_dim = btn_creat(panel_x + FONT_SEL_PAD,
+                                           panel_y + FONT_SEL_PAD,
+                                           FONT_SEL_BTN_W, FONT_SEL_BTN_H,
+                                           0, BTN_TYPE_ANG);
+                    br_btn_mid = btn_creat(panel_x + FONT_SEL_PAD * 2 + FONT_SEL_BTN_W,
+                                           panel_y + FONT_SEL_PAD,
+                                           FONT_SEL_BTN_W, FONT_SEL_BTN_H,
+                                           0, BTN_TYPE_ANG);
+                    br_btn_bri = btn_creat(panel_x + FONT_SEL_PAD * 3 + FONT_SEL_BTN_W * 2,
+                                           panel_y + FONT_SEL_PAD,
+                                           FONT_SEL_BTN_W, FONT_SEL_BTN_H,
+                                           0, BTN_TYPE_ANG);
+                    br_btn_cancel = btn_creat(panel_x + FONT_SEL_PAD,
+                                               panel_y + FONT_SEL_PAD * 2 + FONT_SEL_BTN_H,
+                                               3 * FONT_SEL_BTN_W + 2 * FONT_SEL_PAD,
+                                               36, 0, BTN_TYPE_ANG);
+
+                    /* Configure "暗" (dim) button */
+                    if (br_btn_dim)
+                    {
+                        br_btn_dim->caption   = (uint8_t *)"\xB0\xB5";   /* "暗" */
+                        br_btn_dim->font      = 16;
+                        br_btn_dim->bcfucolor = WHITE;
+                        br_btn_dim->bcfdcolor = BLACK;
+                        btn_draw(br_btn_dim);
+                    }
+
+                    /* Configure "中" (mid) button */
+                    if (br_btn_mid)
+                    {
+                        br_btn_mid->caption   = (uint8_t *)"\xD6\xD0";   /* "中" */
+                        br_btn_mid->font      = 16;
+                        br_btn_mid->bcfucolor = WHITE;
+                        br_btn_mid->bcfdcolor = BLACK;
+                        btn_draw(br_btn_mid);
+                    }
+
+                    /* Configure "亮" (bri) button */
+                    if (br_btn_bri)
+                    {
+                        br_btn_bri->caption   = (uint8_t *)"\xC1\xC1";   /* "亮" */
+                        br_btn_bri->font      = 16;
+                        br_btn_bri->bcfucolor = WHITE;
+                        br_btn_bri->bcfdcolor = BLACK;
+                        btn_draw(br_btn_bri);
+                    }
+
+                    /* Configure cancel button */
+                    if (br_btn_cancel)
+                    {
+                        br_btn_cancel->caption   = (uint8_t *)GUI_BACK_CAPTION_TBL[gui_phy.language];
+                        br_btn_cancel->font      = 16;
+                        br_btn_cancel->bcfucolor = WHITE;
+                        br_btn_cancel->bcfdcolor = BLACK;
+                        btn_draw(br_btn_cancel);
+                    }
+
+                    /* Modal input loop: block until selection or cancel */
+                    while (!bright_sel)
+                    {
+                        tp_dev.scan(0);
+                        in_obj.get_key(&tp_dev, IN_TYPE_TOUCH);
+
+                        if (system_task_return) break;
+
+                        delay_ms(10);
+
+                        if (btn_check(br_btn_dim, &in_obj))
+                        { if ((br_btn_dim->sta & 0X80) == 0) bright_sel = 1; }
+                        if (btn_check(br_btn_mid, &in_obj))
+                        { if ((br_btn_mid->sta & 0X80) == 0) bright_sel = 2; }
+                        if (btn_check(br_btn_bri, &in_obj))
+                        { if ((br_btn_bri->sta & 0X80) == 0) bright_sel = 3; }
+                        if (btn_check(br_btn_cancel, &in_obj))
+                        { if ((br_btn_cancel->sta & 0X80) == 0) break; }
+                    }
+
+                    /* Destroy dialog buttons */
+                    btn_delete(br_btn_dim);
+                    btn_delete(br_btn_mid);
+                    btn_delete(br_btn_bri);
+                    btn_delete(br_btn_cancel);
+
+                    /* Apply brightness change or restore page */
+                    if (bright_sel)
+                    {
+                        ctx->bl_level = bright_sel;
+                        lcd_bl_set_brightness(bright_sel);
+                        /* Restore page content (panel was drawn over it) */
+                        ebook_draw_page(ctx);
+                    }
+                    else
+                    {
+                        /* Restore page content */
+                        ebook_draw_page(ctx);
+                    }
+
+                    swipe_tracking = 0;
+                    continue;
+                }
+            }
+
             /* ---- Check progress bar ---- */
             if (prgb && ctx->file_size > 0)
             {
@@ -1511,6 +1793,7 @@ uint8_t ebook_play(void)
     btn_delete(fbtn);
     btn_delete(bbtn);
     btn_delete(ebtn);
+    btn_delete(brbtn);       /* 销毁亮度按钮 */
     if (prgb) { progressbar_delete(prgb); prgb = NULL; }   /* 销毁进度条 */
     g_ebook_prgb = NULL;                                     /* 清除静态指针 */
     ebook_ctx_deinit(ctx);
