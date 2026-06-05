@@ -376,14 +376,15 @@ static void ebook_draw_page(ebook_ctx_t *ctx)
     UINT     bread;
     uint32_t page_size = ctx->page_end - ctx->page_start;
 
-    /* Clear text area to background color, stopping above progress bar */
+    /* Clear entire area between top and bottom bars with background color.
+     * Full-width, full-height fill eliminates any residual pixels from the
+     * file browser.  The progress bar (if active) is completely redrawn
+     * afterward. */
     {
-        uint16_t prgb_y = lcddev.height - gui_phy.tbheight - PRGB_MARGIN - PRGB_HEIGHT;
         uint16_t bg_color = (ctx->bg_mode == 0) ? WHITE : EYECARE_BG;
-
         gui_fill_rectangle(0, gui_phy.tbheight,
                            lcddev.width,
-                           prgb_y - PRGB_GAP - gui_phy.tbheight,
+                           lcddev.height - gui_phy.tbheight * 2,
                            bg_color);
     }
 
@@ -399,11 +400,11 @@ static void ebook_draw_page(ebook_ctx_t *ctx)
                         ctx->font_size, BLACK);
     }
 
-    /* Redraw progress bar (fill above may have covered it) */
+    /* Redraw progress bar in full (full-area fill above covers it entirely) */
     if (g_ebook_prgb && ctx->file_size > 0)
     {
         g_ebook_prgb->curpos = ctx->page_start;
-        progressbar_setpos(g_ebook_prgb);
+        progressbar_draw_progressbar(g_ebook_prgb);
     }
 }
 
