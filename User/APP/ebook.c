@@ -502,7 +502,7 @@ uint8_t ebook_play(void)
 
     if (ebtn)
     {
-        ebtn->caption   = (uint8_t *)"ï¿½ï¿½ï¿½ï¿½";   /* "æŠ¤çœ¼" in GBK */
+        ebtn->caption   = (uint8_t *)"»¤ÑÛ";   /* "æŠ¤çœ¼" in GBK */
         ebtn->font      = gui_phy.tbfsize;
         ebtn->bcfdcolor = WHITE;
         ebtn->bcfucolor = WHITE;
