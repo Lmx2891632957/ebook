@@ -317,12 +317,13 @@ static void ebook_draw_page(ebook_ctx_t *ctx)
     UINT     bread;
     uint32_t page_size = ctx->page_end - ctx->page_start;
 
-    /* Clear text area to white background (full physical height,
-     * not the font-aligned ctx->text_height, to avoid residue when
-     * font size changes and the aligned height shrinks) */
-    gui_fill_rectangle(ctx->text_x, ctx->text_y,
-                       ctx->text_width,
-                       lcddev.height - gui_phy.tbheight * 2 - 8,
+    /* Clear entire area between top and bottom bars.
+     * Using full width and full inter-bar height ensures no
+     * leftover pixels from the file browser (which previously
+     * showed through the 2~6px margins around the text area). */
+    gui_fill_rectangle(0, gui_phy.tbheight,
+                       lcddev.width,
+                       lcddev.height - gui_phy.tbheight * 2,
                        (ctx->bg_mode == 0) ? WHITE : EYECARE_BG);
 
     if (page_size > 0 && page_size < EBOOK_PAGE_BUF_SIZE)
@@ -501,7 +502,7 @@ uint8_t ebook_play(void)
 
     if (ebtn)
     {
-        ebtn->caption   = (uint8_t *)"»¤ÑÛ";   /* "æŠ¤çœ¼" in GBK */
+        ebtn->caption   = (uint8_t *)"ï¿½ï¿½ï¿½ï¿½";   /* "æŠ¤çœ¼" in GBK */
         ebtn->font      = gui_phy.tbfsize;
         ebtn->bcfdcolor = WHITE;
         ebtn->bcfucolor = WHITE;
