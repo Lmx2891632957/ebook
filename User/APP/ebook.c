@@ -78,9 +78,13 @@ void TIM3_IRQHandler(void)
     {
         TIM3->SR &= ~(uint16_t)(1 << 0);  /* clear UIF */
 
+        /* P0-3: Use direct BSRR writes instead of LCD_BL() macro.
+         * BSRR is atomic by hardware design (writing 0 has no effect),
+         * guaranteeing no RMW race with main-context GPIOC accesses.
+         * Avoids function-call overhead in the ~3kHz ISR path as well. */
         if (sw_bl_pwm_level >= 3)
         {
-            LCD_BL(1);                /* 100% — always ON */
+            GPIOC->BSRR = 1 << 10;         /* PC10=1 — 100% always ON */
         }
         else
         {
@@ -88,9 +92,9 @@ void TIM3_IRQHandler(void)
             if (sw_bl_pwm_cnt >= 3) sw_bl_pwm_cnt = 0;
 
             if (sw_bl_pwm_level >= 2)      /* mid: 66% */
-                LCD_BL(sw_bl_pwm_cnt < 2 ? 1 : 0);
+                GPIOC->BSRR = (sw_bl_pwm_cnt < 2) ? (1 << 10) : (1 << (10 + 16));
             else                            /* dim: 33% */
-                LCD_BL(sw_bl_pwm_cnt == 0 ? 1 : 0);
+                GPIOC->BSRR = (sw_bl_pwm_cnt == 0) ? (1 << 10) : (1 << (10 + 16));
         }
     }
 }
@@ -121,13 +125,14 @@ static void lcd_bl_pwm_init(void)
     TIM3->DIER |= 1 << 0;           /* UIE = 1: enable update interrupt */
     TIM3->CR1  |= 1 << 7;           /* ARPE: auto-reload preload enable */
 
-    /* 4. Enable TIM3 IRQ in NVIC — lowest priority, safe for μC/OS-II */
-    NVIC_SetPriority(TIM3_IRQn, 15);
-    NVIC_EnableIRQ(TIM3_IRQn);
-
-    /* 5. Initialize software PWM state */
+    /* 4. Initialize software PWM state BEFORE enabling interrupts.
+     *    P0-3: prevents spurious ISR from reading uninitialized variables. */
     sw_bl_pwm_cnt   = 0;
     sw_bl_pwm_level = 2;            /* default mid brightness */
+
+    /* 5. Enable TIM3 IRQ in NVIC — lowest priority, safe for μC/OS-II */
+    NVIC_SetPriority(TIM3_IRQn, 15);
+    NVIC_EnableIRQ(TIM3_IRQn);
 
     /* 6. Start TIM3 */
     TIM3->CR1 |= 1 << 0;            /* CEN = 1 */
@@ -212,7 +217,15 @@ static uint8_t ebook_ctx_init(ebook_ctx_t *ctx, FIL *f_txt, uint8_t *pname, uint
     ctx->path     = pname;
     ctx->fname    = fname;
 
-    if (!ctx->raw_buf || !ctx->page_buf) return 1;
+    if (!ctx->raw_buf || !ctx->page_buf)
+    {
+        /* P0-1 fix: rollback partial allocation to prevent memory leak.
+         * If one malloc succeeded and the other failed, free the one that
+         * succeeded before returning — otherwise 4KB leaks per failed open. */
+        if (ctx->raw_buf)  { gui_memin_free(ctx->raw_buf);  ctx->raw_buf  = NULL; }
+        if (ctx->page_buf) { gui_memin_free(ctx->page_buf); ctx->page_buf = NULL; }
+        return 1;
+    }
 
     ctx->bl_level = 2;    /* 默认中档亮度 */
 
@@ -233,6 +246,10 @@ static void ebook_ctx_deinit(ebook_ctx_t *ctx)
     TIM3->CR1  &= ~(uint16_t)(1 << 0);   /* CEN = 0 */
     LCD_BL(1);                            /* restore GPIO backlight ON for file browser */
     if (!ctx) return;
+    /* P0-2 fix: explicitly close the FatFS file before freeing the FIL object.
+     * ctx->file points to the heap-allocated FIL (f_txt).  Relying on f_open's
+     * implicit close or just freeing the memory corrupts FatFS internal state. */
+    if (ctx->file) { f_close(ctx->file); }
     if (ctx->raw_buf)  { gui_memin_free(ctx->raw_buf);  ctx->raw_buf  = NULL; }
     if (ctx->page_buf) { gui_memin_free(ctx->page_buf); ctx->page_buf = NULL; }
     if (ctx->bookmarks) { ebook_bm_free(ctx->bookmarks); ctx->bookmarks = NULL; }
@@ -1111,16 +1128,28 @@ uint8_t ebook_play(void)
                         for (i = 0; i < ctx->bookmarks->count; i++)
                         {
                             uint8_t tmp[8];
-                            bm_item_names[i] = gui_memin_malloc(32);
+                            bm_item_names[i] = gui_memin_malloc(48);
                             if (bm_item_names[i])
                             {
+                                /* Format: "书签N" + ": " + label（或fallback页号） */
                                 strcpy((char *)bm_item_names[i], "\xCA\xE9\xC7\xA9");   /* "书签" */
                                 gui_num2str(tmp, i + 1);
                                 strcat((char *)bm_item_names[i], (char *)tmp);
-                                strcat((char *)bm_item_names[i], ": \xB5\xDA");         /* ": 第" */
-                                gui_num2str(tmp, ctx->bookmarks->entries[i].page_num);
-                                strcat((char *)bm_item_names[i], (char *)tmp);
-                                strcat((char *)bm_item_names[i], " \xD2\xB3");          /* " 页" */
+                                strcat((char *)bm_item_names[i], ": ");
+
+                                /* Use first-sentence label if available, otherwise fallback to page number */
+                                if (ctx->bookmarks->entries[i].label[0] != '\0')
+                                {
+                                    strcat((char *)bm_item_names[i],
+                                           (const char *)ctx->bookmarks->entries[i].label);
+                                }
+                                else
+                                {
+                                    strcat((char *)bm_item_names[i], "\xB5\xDA");       /* "第" */
+                                    gui_num2str(tmp, ctx->bookmarks->entries[i].page_num);
+                                    strcat((char *)bm_item_names[i], (char *)tmp);
+                                    strcat((char *)bm_item_names[i], " \xD2\xB3");      /* " 页" */
+                                }
                                 listbox_addlist(bm_lb, bm_item_names[i]);
                             }
                         }
@@ -1162,9 +1191,13 @@ uint8_t ebook_play(void)
                         {
                             if ((bm_btn_add->sta & 0X80) == 0)
                             {
+                                uint8_t label_buf[EBOOK_BM_LABEL_LEN];
+                                ebook_bm_extract_label(ctx->file, ctx->page_start,
+                                                       label_buf, EBOOK_BM_LABEL_LEN);
                                 uint8_t add_r = ebook_bm_add(ctx->bookmarks,
                                                               ctx->page_start,
-                                                              ctx->page_num);
+                                                              ctx->page_num,
+                                                              label_buf);
                                 if (add_r == 0)
                                 {
                                     /* Success: save and rebuild listbox */
@@ -1190,17 +1223,29 @@ uint8_t ebook_play(void)
                                         for (i = 0; i < ctx->bookmarks->count; i++)
                                         {
                                             uint8_t tmp[8];
-                                            bm_item_names[i] = gui_memin_malloc(32);
+                                            bm_item_names[i] = gui_memin_malloc(48);
                                             if (bm_item_names[i])
                                             {
+                                                /* Format: "书签N" + ": " + label（或fallback页号） */
                                                 strcpy((char *)bm_item_names[i], "\xCA\xE9\xC7\xA9");   /* "书签" */
                                                 gui_num2str(tmp, i + 1);
                                                 strcat((char *)bm_item_names[i], (char *)tmp);
-                                                strcat((char *)bm_item_names[i], ": \xB5\xDA");
-                                                gui_num2str(tmp,
-                                                    ctx->bookmarks->entries[i].page_num);
-                                                strcat((char *)bm_item_names[i], (char *)tmp);
-                                                strcat((char *)bm_item_names[i], " \xD2\xB3");
+                                                strcat((char *)bm_item_names[i], ": ");
+
+                                                /* Use first-sentence label if available, otherwise fallback to page number */
+                                                if (ctx->bookmarks->entries[i].label[0] != '\0')
+                                                {
+                                                    strcat((char *)bm_item_names[i],
+                                                           (const char *)ctx->bookmarks->entries[i].label);
+                                                }
+                                                else
+                                                {
+                                                    strcat((char *)bm_item_names[i], "\xB5\xDA");       /* "第" */
+                                                    gui_num2str(tmp,
+                                                        ctx->bookmarks->entries[i].page_num);
+                                                    strcat((char *)bm_item_names[i], (char *)tmp);
+                                                    strcat((char *)bm_item_names[i], " \xD2\xB3");      /* " 页" */
+                                                }
                                                 listbox_addlist(bm_lb, bm_item_names[i]);
                                             }
                                         }
@@ -1258,7 +1303,7 @@ uint8_t ebook_play(void)
                                              p2_btn2_y, p2_btn3_y;
                                     _btn_obj *p2_btn_jump, *p2_btn_del, *p2_btn_cancel;
                                     uint8_t  p2_run;
-                                    uint8_t  p2_info[32];
+                                    uint8_t  p2_info[48];
 
                                     p2_w = 220;
                                     p2_h = 8 + (gui_phy.tbfsize + 4) + 8
@@ -1284,17 +1329,28 @@ uint8_t ebook_play(void)
                                         p2_w - 16, gui_phy.tbfsize,
                                         gui_phy.tbfsize, WHITE);
 
-                                    /* Bookmark info text */
+                                    /* Bookmark info text — use label if available, else page number */
                                     {
                                         uint8_t tmp2[8];
                                         strcpy((char *)p2_info, "\xCA\xE9\xC7\xA9");     /* "书签" */
                                         gui_num2str(tmp2, bm_selected_idx + 1);
                                         strcat((char *)p2_info, (char *)tmp2);
-                                        strcat((char *)p2_info, ": \xB5\xDA");             /* ": 第" */
-                                        gui_num2str(tmp2,
-                                                   ctx->bookmarks->entries[bm_selected_idx].page_num);
-                                        strcat((char *)p2_info, (char *)tmp2);
-                                        strcat((char *)p2_info, " \xD2\xB3");              /* " 页" */
+                                        strcat((char *)p2_info, ": ");
+
+                                        if (ctx->bookmarks->entries[bm_selected_idx].label[0] != '\0')
+                                        {
+                                            strncat((char *)p2_info,
+                                                    (const char *)ctx->bookmarks->entries[bm_selected_idx].label,
+                                                    sizeof(p2_info) - strlen((const char *)p2_info) - 1);
+                                        }
+                                        else
+                                        {
+                                            strcat((char *)p2_info, "\xB5\xDA");             /* "第" */
+                                            gui_num2str(tmp2,
+                                                       ctx->bookmarks->entries[bm_selected_idx].page_num);
+                                            strcat((char *)p2_info, (char *)tmp2);
+                                            strcat((char *)p2_info, " \xD2\xB3");            /* " 页" */
+                                        }
                                     }
                                     gui_show_string(p2_info,
                                                     p2_x + 8, p2_info_y,
@@ -1441,17 +1497,29 @@ uint8_t ebook_play(void)
                                             for (i = 0; i < ctx->bookmarks->count; i++)
                                             {
                                                 uint8_t tmp[8];
-                                                bm_item_names[i] = gui_memin_malloc(32);
+                                                bm_item_names[i] = gui_memin_malloc(48);
                                                 if (bm_item_names[i])
                                                 {
+                                                    /* Format: "书签N" + ": " + label（或fallback页号） */
                                                     strcpy((char *)bm_item_names[i], "\xCA\xE9\xC7\xA9");   /* "书签" */
                                                     gui_num2str(tmp, i + 1);
                                                     strcat((char *)bm_item_names[i], (char *)tmp);
-                                                    strcat((char *)bm_item_names[i], ": \xB5\xDA");
-                                                    gui_num2str(tmp,
-                                                        ctx->bookmarks->entries[i].page_num);
-                                                    strcat((char *)bm_item_names[i], (char *)tmp);
-                                                    strcat((char *)bm_item_names[i], " \xD2\xB3");
+                                                    strcat((char *)bm_item_names[i], ": ");
+
+                                                    /* Use first-sentence label if available, otherwise fallback to page number */
+                                                    if (ctx->bookmarks->entries[i].label[0] != '\0')
+                                                    {
+                                                        strcat((char *)bm_item_names[i],
+                                                               (const char *)ctx->bookmarks->entries[i].label);
+                                                    }
+                                                    else
+                                                    {
+                                                        strcat((char *)bm_item_names[i], "\xB5\xDA");       /* "第" */
+                                                        gui_num2str(tmp,
+                                                            ctx->bookmarks->entries[i].page_num);
+                                                        strcat((char *)bm_item_names[i], (char *)tmp);
+                                                        strcat((char *)bm_item_names[i], " \xD2\xB3");      /* " 页" */
+                                                    }
                                                     listbox_addlist(bm_lb, bm_item_names[i]);
                                                 }
                                             }
@@ -1710,6 +1778,13 @@ uint8_t ebook_play(void)
             if (res && ((rbtn->sta & 0X80) == 0))
             {
                 /* Return to file browsing */
+                if (prgb) { progressbar_delete(prgb); prgb = NULL; }
+                /* Disable software backlight PWM before returning to browse */
+                NVIC_DisableIRQ(TIM3_IRQn);
+                TIM3->DIER &= ~(uint16_t)(1 << 0);
+                TIM3->CR1  &= ~(uint16_t)(1 << 0);
+                LCD_BL(1);
+                g_ebook_prgb = NULL;
                 ebook_ctx_deinit(ctx);
                 ctx = NULL;
                 gui_memin_free(pname);
@@ -1796,10 +1871,13 @@ uint8_t ebook_play(void)
     btn_delete(brbtn);       /* 销毁亮度按钮 */
     if (prgb) { progressbar_delete(prgb); prgb = NULL; }   /* 销毁进度条 */
     g_ebook_prgb = NULL;                                     /* 清除静态指针 */
-    ebook_ctx_deinit(ctx);
-    gui_memin_free(pname);
+    if (ctx)   { ebook_ctx_deinit(ctx); ctx = NULL; }        /* 安全释放阅读上下文 */
+    if (pname) { gui_memin_free(pname); pname = NULL; }      /* 安全释放书名 */
     gui_memin_free(ebookinfo);
     gui_memin_free(buf);
+    /* P0-2 fix: close file before freeing FIL object — FatFS requires
+     * explicit f_close to flush cache and release internal state. */
+    if (f_txt) { f_close(f_txt); }
     gui_memin_free(f_txt);
     return rval;
 }
