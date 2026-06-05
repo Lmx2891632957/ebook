@@ -137,6 +137,7 @@ extern uint32_t  g_back_color;      /* ╠Ё╬╟яуи╚.д╛хон╙╟ви╚ */
 #define LIGHTBLUE       0X7D7C      /* гЁю╤и╚ */
 #define GRAYBLUE        0X5458      /* ╩рю╤и╚ */
 #define LIGHTGREEN      0X841F      /* гЁбли╚ */
+#define EYECARE_BG      0xFFF0      /* Ф┼╓Г°╪Ф╣┘И╩└Х┴╡Х┐▄Ф≥╞ */
 #define LGRAY           0XC618      /* гЁ╩ри╚(PANNEL),╢╟лЕ╠Ё╬╟и╚ */
 #define LGRAYBLUE       0XA651      /* гЁ╩рю╤и╚(жп╪Д╡Цяуи╚) */
 #define LBBLUE          0X2B12      /* гЁвью╤и╚(я║тЯлУд©╣д╥╢и╚) */

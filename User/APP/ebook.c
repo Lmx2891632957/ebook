@@ -323,7 +323,7 @@ static void ebook_draw_page(ebook_ctx_t *ctx)
     gui_fill_rectangle(ctx->text_x, ctx->text_y,
                        ctx->text_width,
                        lcddev.height - gui_phy.tbheight * 2 - 8,
-                       WHITE);
+                       (ctx->bg_mode == 0) ? WHITE : EYECARE_BG);
 
     if (page_size > 0 && page_size < EBOOK_PAGE_BUF_SIZE)
     {
@@ -419,6 +419,7 @@ uint8_t ebook_play(void)
     _btn_obj *rbtn;
     _btn_obj *fbtn;
     _btn_obj *bbtn;
+    _btn_obj *ebtn;
     _filelistbox_obj *flistbox;
     _filelistbox_list *filelistx;
 
@@ -491,6 +492,20 @@ uint8_t ebook_play(void)
         bbtn->bcfdcolor = WHITE;
         bbtn->bcfucolor = WHITE;
         btn_draw(bbtn);
+    }
+    /* Eye-care button - positioned to the left of bookmark button */
+    ebtn = btn_creat(lcddev.width - 8 * gui_phy.tbfsize - 47,
+                     lcddev.height - gui_phy.tbheight,
+                     2 * gui_phy.tbfsize + 8, gui_phy.tbheight - 1,
+                     0, 0x03);
+
+    if (ebtn)
+    {
+        ebtn->caption   = (uint8_t *)"»¤ÑÛ";   /* "æŠ¤çœ¼" in GBK */
+        ebtn->font      = gui_phy.tbfsize;
+        ebtn->bcfdcolor = WHITE;
+        ebtn->bcfucolor = WHITE;
+        btn_draw(ebtn);
     }
 
     buf = gui_memin_malloc(1024);
@@ -621,6 +636,7 @@ uint8_t ebook_play(void)
                 ebooksta = 1;
                 btn_draw(fbtn);   /* ensure font button is visible */
                 btn_draw(bbtn);   /* ensure bookmark button is visible */
+                btn_draw(ebtn);   /* ensure eye-care button is visible */
             }
         }
 
@@ -1219,6 +1235,23 @@ uint8_t ebook_play(void)
                     continue;
                 }
             }
+            /* ---- Check eye-care button ---- */
+            if (ebtn)
+            {
+                res = btn_check(ebtn, &in_obj);
+
+                if (res && ((ebtn->sta & 0X80) == 0))
+                {
+                    /* Toggle background mode: 0 <-> 1 */
+                    ctx->bg_mode = (ctx->bg_mode == 0) ? 1 : 0;
+
+                    /* Redraw page with new background color */
+                    ebook_draw_page(ctx);
+                    ebook_show_page_num(ctx);
+                    swipe_tracking = 0;
+                    continue;
+                }
+            }
 
             /* ---- Check return button ---- */
             res = btn_check(rbtn, &in_obj);
@@ -1307,6 +1340,7 @@ uint8_t ebook_play(void)
     btn_delete(rbtn);
     btn_delete(fbtn);
     btn_delete(bbtn);
+    btn_delete(ebtn);
     ebook_ctx_deinit(ctx);
     gui_memin_free(pname);
     gui_memin_free(ebookinfo);
