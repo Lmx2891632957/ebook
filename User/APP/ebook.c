@@ -518,6 +518,88 @@ static void ebook_scan_page_forward(ebook_ctx_t *ctx)
 }
 
 /**
+ * @brief       Scan backward from current page_start to find the previous page.
+ *              Iteratively scans forward from estimated positions until a page
+ *              ending exactly at the original page_start is found.
+ * @param       ctx     : pointer to context struct (reads page_start, writes page_start + page_end)
+ * @retval      None
+ * @note        Used when prev_count == 0 (e.g., after progress bar or bookmark jump)
+ *              to navigate to the previous page by file content rather than history.
+ *              On failure (no previous page found), stays at the current page.
+ */
+static void ebook_scan_page_backward(ebook_ctx_t *ctx)
+{
+    uint32_t target;      /* goal: find X such that scan_forward(X) ends here */
+    uint32_t lo, hi, mid; /* binary search bounds in [0, target)          */
+    uint32_t best;        /* last mid that gave page_end < target (fallback) */
+    uint8_t  found = 0;
+    uint8_t  iter;
+
+    target = ctx->page_start;
+    if (target == 0) return;  /* already at file start */
+
+    lo   = 0;
+    hi   = target;
+    best = target;  /* fallback: stay at current page if nothing found */
+
+    /* Binary search: scan_page_forward is monotonic (larger page_start →
+     * larger or equal page_end).  We search [lo, hi) for a position whose
+     * page ends exactly at target.  Converges in O(log₂(target)) ≈ 12–15
+     * iterations; each reads one 4 KB chunk from the SD card. */
+    for (iter = 0; iter < 32 && lo < hi; iter++)
+    {
+        mid = lo + (hi - lo) / 2;
+        mid = ebook_align_gbk(ctx, mid);
+
+        /* Interval exhausted — no more positions to try */
+        if (mid <= lo || mid >= hi) break;
+
+        ctx->page_start = mid;
+        ebook_scan_page_forward(ctx);          /* sets ctx->page_end */
+
+        if (ctx->page_end == target)
+        {
+            /* Exact match: page_start and page_end are already set. */
+            found = 1;
+            break;
+        }
+
+        if (ctx->page_end < target)
+        {
+            /* Page from mid ends before target → answer is further right.
+             * Remember this mid as best fallback, then advance lo. */
+            best = mid;
+            lo   = ctx->page_end;
+        }
+        else  /* ctx->page_end > target */
+        {
+            /* Page from mid overshoots target → answer is further left. */
+            hi = mid;
+        }
+    }
+
+    if (!found)
+    {
+        /* No exact match.  Use 'best' (the last mid whose page ended before
+         * target), or stay at the original page if even that doesn't exist
+         * (e.g. target lies inside the very first page of the file). */
+        ctx->page_start = best;
+        if (best < target)
+        {
+            /* Force page_end = target so the caller's "next page" returns
+             * to the original jump position.  gui_show_string renders only
+             * what fits on screen; extra bytes beyond one page are invisible. */
+            ctx->page_end = target;
+        }
+        else
+        {
+            /* No valid previous page — stay at the current page. */
+            ebook_scan_page_forward(ctx);
+        }
+    }
+}
+
+/**
  * @brief       Read current page content from file and render to LCD
  * @param       ctx     : pointer to context struct
  * @retval      None
@@ -600,9 +682,24 @@ static uint8_t ebook_turn_page(ebook_ctx_t *ctx, int dir)
     else if (dir < 0)
     {
         /* ----- Backward: previous page ----- */
-        if (ctx->prev_count == 0) return 1;  /* no history */
-
-        ctx->page_start = ebook_history_pop(ctx);
+        if (ctx->prev_count > 0)
+        {
+            /* Use sequential reading history */
+            ctx->page_start = ebook_history_pop(ctx);
+        }
+        else
+        {
+            /* No history (e.g., after progress bar / bookmark jump):
+             * scan backward by file content to find the previous page.
+             * scan_backward sets both page_start and page_end correctly,
+             * so we skip the common re-scan and go directly to draw. */
+            if (ctx->page_start == 0) return 1;  /* already at file start */
+            ebook_scan_page_backward(ctx);
+            if (ctx->page_num > 1) ctx->page_num--;
+            ebook_draw_page(ctx);
+            ebook_show_page_num(ctx);
+            return 0;
+        }
         if (ctx->page_num > 1) ctx->page_num--;
     }
     else
@@ -610,7 +707,7 @@ static uint8_t ebook_turn_page(ebook_ctx_t *ctx, int dir)
         return 1;
     }
 
-    ebook_scan_page_forward(ctx);   /* compute page_end */
+    ebook_scan_page_forward(ctx);   /* compute page_end (history path) */
     ebook_draw_page(ctx);            /* render to LCD */
     ebook_show_page_num(ctx);       /* update page indicator */
 
