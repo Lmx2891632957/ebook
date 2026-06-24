@@ -519,9 +519,11 @@ static void ebook_scan_page_forward(ebook_ctx_t *ctx)
 
 /**
  * @brief       Scan backward from current page_start to find the previous page.
- *              Iteratively scans forward from estimated positions until a page
- *              ending exactly at the original page_start is found.
- * @param       ctx     : pointer to context struct (reads page_start, writes page_start + page_end)
+ *              Uses binary search with a narrow range estimated from the current
+ *              page's byte count (2× page_bytes before target), bounding iterations
+ *              to ~11 regardless of file position.
+ * @param       ctx     : pointer to context struct (reads page_start + page_end,
+ *                       writes page_start + page_end)
  * @retval      None
  * @note        Used when prev_count == 0 (e.g., after progress bar or bookmark jump)
  *              to navigate to the previous page by file content rather than history.
@@ -535,17 +537,24 @@ static void ebook_scan_page_backward(ebook_ctx_t *ctx)
     uint8_t  found = 0;
     uint8_t  iter;
 
+    uint32_t page_bytes;
+
     target = ctx->page_start;
     if (target == 0) return;  /* already at file start */
 
-    lo   = 0;
+    /* Narrow the search range using the current page's byte count.
+     * A typical page is ~1-2 KB; the previous page is likely within
+     * 2× that distance.  This bounds iterations to O(log₂(page_bytes))
+     * ≈ 11 regardless of file position, instead of O(log₂(target)). */
+    page_bytes = ctx->page_end - ctx->page_start;
+    lo = (target > page_bytes * 2) ? (target - page_bytes * 2) : 0;
     hi   = target;
     best = target;  /* fallback: stay at current page if nothing found */
 
     /* Binary search: scan_page_forward is monotonic (larger page_start →
      * larger or equal page_end).  We search [lo, hi) for a position whose
-     * page ends exactly at target.  Converges in O(log₂(target)) ≈ 12–15
-     * iterations; each reads one 4 KB chunk from the SD card. */
+     * page ends exactly at target.  Each iteration reads one 4 KB chunk
+     * from the SD card. */
     for (iter = 0; iter < 32 && lo < hi; iter++)
     {
         mid = lo + (hi - lo) / 2;
@@ -580,20 +589,59 @@ static void ebook_scan_page_backward(ebook_ctx_t *ctx)
 
     if (!found)
     {
-        /* No exact match.  Use 'best' (the last mid whose page ended before
-         * target), or stay at the original page if even that doesn't exist
-         * (e.g. target lies inside the very first page of the file). */
-        ctx->page_start = best;
         if (best < target)
         {
-            /* Force page_end = target so the caller's "next page" returns
-             * to the original jump position.  gui_show_string renders only
-             * what fits on screen; extra bytes beyond one page are invisible. */
-            ctx->page_end = target;
+            /* No exact match but we have a fallback: a position whose page
+             * ended before target.  Force page_end = target so the caller's
+             * "next page" returns to the original jump position.
+             * gui_show_string renders only what fits; extra bytes are invisible. */
+            ctx->page_start = best;
+            ctx->page_end   = target;
+        }
+        else if (lo > 0)
+        {
+            /* Narrow range [target-2*page_bytes, target) missed — the previous
+             * page is likely much larger than the current one (e.g. current page
+             * is a short chapter-end fragment).  Retry with full range [0, lo). */
+            uint32_t saved_hi = lo;
+            lo   = 0;
+            hi   = saved_hi;
+            best = target;
+            for (iter = 0; iter < 32 && lo < hi; iter++)
+            {
+                mid = lo + (hi - lo) / 2;
+                mid = ebook_align_gbk(ctx, mid);
+                if (mid <= lo || mid >= hi) break;
+                ctx->page_start = mid;
+                ebook_scan_page_forward(ctx);
+                if (ctx->page_end == target)
+                {
+                    found = 1;
+                    break;
+                }
+                if (ctx->page_end < target)
+                {
+                    best = mid;
+                    lo   = ctx->page_end;
+                }
+                else
+                {
+                    hi = mid;
+                }
+            }
+            if (!found)
+            {
+                ctx->page_start = best;
+                if (best < target)
+                    ctx->page_end = target;
+                else
+                    ebook_scan_page_forward(ctx);
+            }
         }
         else
         {
-            /* No valid previous page — stay at the current page. */
+            /* lo == 0 and no valid previous page — must be at the very first
+             * page boundary.  Stay at the current page. */
             ebook_scan_page_forward(ctx);
         }
     }
