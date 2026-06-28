@@ -203,8 +203,4 @@ ebook/
 
 ---
 
-## 相关文档
 
-- [分段读取实现详解](readme/FenDuanDuQu.md) — GBK 排版引擎, 双缓冲, 内存管理
-- [团队分工文档](readme/TeamWork.md) — 三人分工方案与答辩建议
-- [执行时序流程图](执行时序流程图.drawio) — 上电到应用循环的完整时序 (用 draw.io 打开)
